@@ -8,7 +8,9 @@ use std::time::{Duration, Instant};
 
 use codelib_sandbox::codelib_http::{Egress, Rule, StaticCredential, StatusCode, text_response};
 use codelib_sandbox::wasmtime::component::{Accessor, Instance};
-use codelib_sandbox::{Ctx, Error, Limits, Runtime, RuntimeBuilder, Session, SessionOptions};
+use codelib_sandbox::{
+    Console, Ctx, Error, Limits, Runtime, RuntimeBuilder, Session, SessionOptions,
+};
 use codelib_sandbox::{WasiConfig, wasmtime};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpListener;
@@ -848,4 +850,163 @@ async fn a_p3_runtime_still_runs_0_2_components() {
             .unwrap()
     };
     assert_eq!(roll(&runtime).await, roll(&runtime).await, "seeded");
+}
+
+// ---------------------------------------------------------------------------
+// The browser kit's `clock-p3` fixture, hosted natively
+// ---------------------------------------------------------------------------
+
+/// `web/test/fixtures/clock-p3.wasm`: a `wasi:cli/run@0.3.0` command that the
+/// browser kit's tests run too, so both kits are checked against one component.
+fn clock_runtime(wasi: WasiConfig, limits: Limits) -> Runtime<()> {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../web/test/fixtures/clock-p3.wasm"
+    );
+    Runtime::<()>::builder()
+        .component_bytes(std::fs::read(path).expect("the clock-p3 fixture is built"))
+        .no_cache()
+        .wasi(wasi)
+        .limits(limits)
+        .build()
+        .expect("clock-p3 builds")
+}
+
+fn with_args(mut wasi: WasiConfig, args: &[&str]) -> WasiConfig {
+    // Like a real command line, the first argument is the program name.
+    wasi.args = std::iter::once("clock-p3")
+        .chain(args.iter().copied())
+        .map(String::from)
+        .collect();
+    wasi
+}
+
+/// Runs the `run` export; the inner result is the guest's own `ok`/`err`.
+async fn run_command(session: &mut Session<()>) -> Result<Result<(), ()>, Error> {
+    session
+        .call_concurrent(async |accessor, instance| {
+            let command = accessor.with(|mut store| {
+                wasmtime_wasi::p3::bindings::Command::new(&mut store, instance)
+            })?;
+            command.wasi_cli_run().call_run(accessor).await
+        })
+        .await
+}
+
+async fn clock_run(wasi: WasiConfig, limits: Limits) -> (Result<Result<(), ()>, Error>, Console) {
+    let runtime = clock_runtime(wasi, limits);
+    let mut session = runtime.session(SessionOptions::default()).await.unwrap();
+    let result = run_command(&mut session).await;
+    (result, session.console())
+}
+
+/// The first line of a probe's output that starts with `prefix`.
+fn line<'a>(stdout: &'a str, prefix: &str) -> &'a str {
+    stdout
+        .lines()
+        .find(|l| l.starts_with(prefix))
+        .unwrap_or_else(|| panic!("no `{prefix}` line in {stdout:?}"))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clock_p3_probe_runs_to_completion() {
+    let started = Instant::now();
+    let (result, console) = clock_run(
+        with_args(WasiConfig::default(), &["probe", "20"]),
+        Limits::default(),
+    )
+    .await;
+    assert_eq!(result.unwrap(), Ok(()));
+
+    // The stable parts: the argument echo, a concurrent wait that ends the
+    // shorter timer first, and a sleep of at least the requested time on the
+    // real monotonic clock. The values themselves vary run to run.
+    let out = &console.stdout;
+    assert!(out.starts_with("t0="), "{out}");
+    assert!(
+        line(out, "args=").starts_with("args=clock-p3,probe,20 env="),
+        "{out}"
+    );
+    assert!(line(out, "random=").contains("insecure=0x"), "{out}");
+    assert_eq!(line(out, "bytes=").len(), "bytes=".len() + 32, "{out}");
+    let number = |prefix: &str, line: &str| -> u64 {
+        let rest = &line[line.find(prefix).unwrap() + prefix.len()..];
+        rest.split(|c: char| !c.is_ascii_digit())
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let timers = line(out, "fast=");
+    assert!(
+        number("fast=+", timers) >= 10_000_000
+            && number("fast=+", timers) < number("slow=+", timers),
+        "{timers}"
+    );
+    assert!(number("slow=+", timers) >= 30_000_000, "{timers}");
+    assert!(number("slept=", line(out, "slept=")) >= 20_000_000, "{out}");
+    assert_eq!(console.stderr, "done\n");
+    assert!(started.elapsed() >= Duration::from_millis(50));
+}
+
+/// Same seed, same bytes; another seed, other bytes. Every line of the probe
+/// derives from the seeded generators, the frozen clocks or the arguments, so
+/// the whole output is compared.
+#[tokio::test(flavor = "multi_thread")]
+async fn clock_p3_is_deterministic_under_a_seed() {
+    let run = async |seed: u64| {
+        let (result, console) = clock_run(
+            with_args(WasiConfig::deterministic(seed), &["probe", "20"]),
+            Limits::default(),
+        )
+        .await;
+        assert_eq!(result.unwrap(), Ok(()));
+        console
+    };
+    let (a, b, c) = (run(42).await, run(42).await, run(43).await);
+    assert_eq!(a.stdout.as_bytes(), b.stdout.as_bytes());
+    assert_eq!(a.stderr, b.stderr);
+    assert_ne!(a.stdout, c.stdout);
+
+    // Frozen clocks: the wall clock sits at 2026-01-01 and the monotonic
+    // clock at zero, so the timers' elapsed times and the sleep read as zero
+    // although they waited in real time.
+    let out = &a.stdout;
+    assert!(out.contains("t0=0 wall=1767225600.000000000"), "{out}");
+    assert!(out.contains("args=clock-p3,probe,20 env=\n"), "{out}");
+    assert!(out.contains("fast=+0 slow=+0"), "{out}");
+    assert!(out.contains("slept=0\n"), "{out}");
+    assert_ne!(line(out, "random="), line(&c.stdout, "random="));
+    assert_ne!(line(out, "bytes="), line(&c.stdout, "bytes="));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clock_p3_spin_is_stopped_by_the_deadline() {
+    let runtime = clock_runtime(
+        with_args(WasiConfig::default(), &["spin"]),
+        Limits::default().timeout(Duration::from_millis(300)),
+    );
+    let mut session = runtime.session(SessionOptions::default()).await.unwrap();
+    let started = Instant::now();
+    let result = run_command(&mut session).await;
+    assert!(matches!(result, Err(Error::Timeout(_))), "got {result:?}");
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(session.is_poisoned());
+    assert_eq!(session.console().stdout, "spinning\n");
+}
+
+/// `fail` returns `err` from `run`: a result the host reads, not a trap, so
+/// the session stays usable.
+#[tokio::test(flavor = "multi_thread")]
+async fn clock_p3_fail_is_an_error_result_not_a_trap() {
+    let runtime = clock_runtime(
+        with_args(WasiConfig::default(), &["fail"]),
+        Limits::default(),
+    );
+    let mut session = runtime.session(SessionOptions::default()).await.unwrap();
+    assert_eq!(run_command(&mut session).await.unwrap(), Err(()));
+    assert!(!session.is_poisoned());
+    let console = session.console();
+    assert_eq!(console.stderr, "failing on purpose\n");
+    assert_eq!(console.stdout, "");
 }

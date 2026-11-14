@@ -108,7 +108,9 @@ The unit tests check the patches against jco's real output, the version pin, the
 worlds and the egress decisions. The browser tests run a WASI 0.3 fixture
 (`test/fixtures/clock-p3`, rebuilt by `test/fixtures/build.sh`) in both worlds, a composed
 fixture (`pair-p3`), codelib's guest (values, `await`, console, `host.call`, errors, deadline) and
-the egress policy against a local server and a virtual host. The playground test loads the built
+the egress policy against a local server and a virtual host. The native kit's tests
+(`crates/codelib-sandbox/tests/p3.rs`) host the same `clock-p3` component, so both kits are checked
+against one binary. The playground test loads the built
 site under `/codelib/`, runs examples and checks the canvas, Stop and the credential example.
 
 ## The playground
