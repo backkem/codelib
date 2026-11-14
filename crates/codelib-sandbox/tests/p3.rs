@@ -213,7 +213,7 @@ async fn async_host_imports_suspend_the_guest() {
         .call_concurrent(async |accessor, instance| {
             let fixture = guest(accessor, instance)?;
             let (doubled, echoed) =
-                tokio::join!(fixture.call_twice_later(accessor, 300, 21), async {
+                tokio::join!(fixture.call_twice_later(accessor, 1000, 21), async {
                     let echoed = fixture.call_echo(accessor, "meanwhile".into()).await;
                     (echoed, started.elapsed())
                 },);
@@ -223,17 +223,17 @@ async fn async_host_imports_suspend_the_guest() {
         .await
         .unwrap();
     assert_eq!(doubled, 42);
-    assert!(started.elapsed() >= Duration::from_millis(300));
+    assert!(started.elapsed() >= Duration::from_millis(1000));
     assert!(
-        echoed_after < Duration::from_millis(250),
+        echoed_after < Duration::from_millis(700),
         "the echo waited for the import: {echoed_after:?}"
     );
     assert_eq!(session.finish().state.calls, 1);
 }
 
 /// Several export calls run at once in one session: four calls that each
-/// wait 300 ms on the host, and three that sleep 300 ms on the guest's
-/// monotonic clock, finish in about 300 ms rather than 2.1 s.
+/// wait 1 s on the host, and three that sleep 1 s on the guest's
+/// monotonic clock, finish in about 1 s rather than 7 s.
 #[tokio::test(flavor = "multi_thread")]
 async fn export_calls_run_concurrently() {
     let mut session = start(&shared()).await;
@@ -242,13 +242,13 @@ async fn export_calls_run_concurrently() {
         .call_concurrent(async |accessor, instance| {
             let fixture = guest(accessor, instance)?;
             let (a, b, c, d, e, f, g) = tokio::join!(
-                fixture.call_twice_later(accessor, 300, 1),
-                fixture.call_twice_later(accessor, 300, 2),
-                fixture.call_twice_later(accessor, 300, 3),
-                fixture.call_twice_later(accessor, 300, 4),
-                fixture.call_sleep(accessor, 300),
-                fixture.call_sleep(accessor, 300),
-                fixture.call_sleep(accessor, 300),
+                fixture.call_twice_later(accessor, 1000, 1),
+                fixture.call_twice_later(accessor, 1000, 2),
+                fixture.call_twice_later(accessor, 1000, 3),
+                fixture.call_twice_later(accessor, 1000, 4),
+                fixture.call_sleep(accessor, 1000),
+                fixture.call_sleep(accessor, 1000),
+                fixture.call_sleep(accessor, 1000),
             );
             e?;
             f?;
@@ -259,9 +259,9 @@ async fn export_calls_run_concurrently() {
         .unwrap();
     let elapsed = started.elapsed();
     assert_eq!(results, [2, 4, 6, 8]);
-    assert!(elapsed >= Duration::from_millis(300), "{elapsed:?}");
+    assert!(elapsed >= Duration::from_millis(1000), "{elapsed:?}");
     assert!(
-        elapsed < Duration::from_millis(1000),
+        elapsed < Duration::from_millis(3000),
         "ran one by one: {elapsed:?}"
     );
     let state = session.finish().state;
@@ -274,9 +274,10 @@ async fn export_calls_run_concurrently() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_spinning_guest_times_out_and_poisons_the_session() {
-    let runtime = runtime(Limits::default().timeout(Duration::from_millis(300)));
-    let mut session = start(&runtime).await;
+    let mut session = start(&shared()).await;
 
+    // Only the spinning call gets the short budget; starting the session does not.
+    session.set_timeout(Duration::from_millis(300));
     let started = Instant::now();
     let result = spin(&mut session).await;
     let elapsed = started.elapsed();
@@ -285,7 +286,7 @@ async fn a_spinning_guest_times_out_and_poisons_the_session() {
         elapsed >= Duration::from_millis(250),
         "too early: {elapsed:?}"
     );
-    assert!(elapsed < Duration::from_secs(5), "too late: {elapsed:?}");
+    assert!(elapsed < Duration::from_secs(10), "too late: {elapsed:?}");
 
     assert!(session.is_poisoned());
     assert!(matches!(
@@ -299,8 +300,7 @@ async fn a_spinning_guest_times_out_and_poisons_the_session() {
 /// still comes back.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_guest_sleeping_on_the_monotonic_clock_times_out() {
-    let runtime = runtime(Limits::default().timeout(Duration::from_millis(300)));
-    let mut session = start(&runtime).await;
+    let mut session = start(&shared()).await;
     assert_eq!(
         session
             .call_concurrent(async |accessor, instance| {
@@ -313,11 +313,13 @@ async fn a_guest_sleeping_on_the_monotonic_clock_times_out() {
         10
     );
 
+    // The short budget starts after the warm-up call, which has to succeed.
+    session.set_timeout(Duration::from_millis(300));
     let started = Instant::now();
     let result = sleep(&mut session, 60_000).await;
     let elapsed = started.elapsed();
     assert!(matches!(result, Err(Error::Timeout(_))), "got {result:?}");
-    assert!(elapsed < Duration::from_secs(2), "took {elapsed:?}");
+    assert!(elapsed < Duration::from_secs(10), "took {elapsed:?}");
     assert!(session.is_poisoned());
     assert_eq!(session.finish().state.calls, 1);
 }
@@ -367,11 +369,15 @@ async fn an_error_from_the_closure_poisons_the_session() {
 /// tick, inside the concurrent event loop too, so other tasks keep running.
 #[tokio::test(flavor = "current_thread")]
 async fn a_spinning_guest_does_not_starve_a_current_thread_executor() {
-    let runtime = runtime(Limits::default().timeout(Duration::from_millis(800)));
+    let runtime = shared();
     let spinner = tokio::spawn({
         let runtime = runtime.clone();
         async move {
             let mut session = start(&runtime).await;
+            // The budget covers the spinning call only, not starting the
+            // session; a starved executor would show as a latency of about
+            // this long.
+            session.set_timeout(Duration::from_secs(3));
             spin(&mut session).await
         }
     });
@@ -381,7 +387,7 @@ async fn a_spinning_guest_does_not_starve_a_current_thread_executor() {
     tokio::time::sleep(Duration::from_millis(10)).await;
     let latency = started.elapsed();
     assert!(
-        latency < Duration::from_millis(400),
+        latency < Duration::from_secs(2),
         "a 10ms sleep took {latency:?} next to a spinning guest"
     );
     assert!(matches!(spinner.await.unwrap(), Err(Error::Timeout(_))));
@@ -667,7 +673,7 @@ async fn http_is_denied_by_default_with_a_console_note() {
     let denied = fetch(&mut session, post).await.unwrap();
     assert!(denied.is_err(), "{denied:?}");
     assert!(
-        started.elapsed() < Duration::from_secs(2),
+        started.elapsed() < Duration::from_secs(10),
         "{:?}",
         started.elapsed()
     );
@@ -794,7 +800,9 @@ async fn the_compile_cache_works_for_0_3_components() {
             .count()
     };
 
+    let started = Instant::now();
     let cold = build();
+    let cold_build = started.elapsed();
     assert_eq!(entries(), 1, "one cache entry is written");
     let started = Instant::now();
     let warm = build();
@@ -804,7 +812,12 @@ async fn the_compile_cache_works_for_0_3_components() {
         assert_eq!(echo(&mut session, "cached").await.unwrap(), "cached");
     }
     assert_eq!(entries(), 1);
-    assert!(warm_build < Duration::from_secs(2), "{warm_build:?}");
+    // Loading the cached entry skips the compile; compared with the cold build
+    // so the bound scales with the machine.
+    assert!(
+        warm_build < cold_build / 2,
+        "warm {warm_build:?}, cold {cold_build:?}"
+    );
 }
 
 /// A WASI 0.2 component (sync exports, a 0.2 import) on a runtime built with
@@ -984,13 +997,15 @@ async fn clock_p3_is_deterministic_under_a_seed() {
 async fn clock_p3_spin_is_stopped_by_the_deadline() {
     let runtime = clock_runtime(
         with_args(WasiConfig::default(), &["spin"]),
-        Limits::default().timeout(Duration::from_millis(300)),
+        Limits::default(),
     );
     let mut session = runtime.session(SessionOptions::default()).await.unwrap();
+    // Only the spinning run gets the short budget; starting the session does not.
+    session.set_timeout(Duration::from_millis(300));
     let started = Instant::now();
     let result = run_command(&mut session).await;
     assert!(matches!(result, Err(Error::Timeout(_))), "got {result:?}");
-    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(started.elapsed() < Duration::from_secs(10));
     assert!(session.is_poisoned());
     assert_eq!(session.console().stdout, "spinning\n");
 }

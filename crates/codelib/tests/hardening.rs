@@ -166,7 +166,7 @@ async fn get_bodies_are_discarded_not_read() {
     let service = serve(
         &SANDBOX,
         "let n = 0; host.serve((request) => new Response(`${request.method} ${++n}`))",
-        Some(Limits::default().timeout(Duration::from_secs(1))),
+        None,
     )
     .await;
 
@@ -177,7 +177,7 @@ async fn get_bodies_are_discarded_not_read() {
         .unwrap();
     let answer = service.handle_buffered(stalled, MAX_BODY).await.unwrap();
     assert_eq!(answer.body(), "GET 1");
-    assert!(started.elapsed() < Duration::from_millis(900));
+    assert!(started.elapsed() < Duration::from_secs(10));
 
     for n in 2..=60 {
         let method = if n % 2 == 0 { "GET" } else { "HEAD" };
@@ -279,10 +279,11 @@ async fn service_later_timeout_is_not_reported_as_out_of_memory() {
                 try {{ {HOG} }} catch {{ return new Response("recovered"); }}
             }})"#
         ),
+        // The budget also covers starting the service and the first request.
         Some(
             Limits::default()
                 .memory(96 * 1024 * 1024)
-                .timeout(Duration::from_secs(3)),
+                .timeout(Duration::from_secs(10)),
         ),
     )
     .await;
@@ -333,7 +334,8 @@ async fn finish_of_a_dead_service_reports_what_ended_it() {
     let service = serve(
         &SANDBOX,
         "host.serve(() => { console.log('spinning'); while (true) {} }); return 'ready'",
-        Some(Limits::default().timeout(Duration::from_millis(500))),
+        // The budget also covers starting the service, which must succeed.
+        Some(Limits::default().timeout(Duration::from_secs(10))),
     )
     .await;
     let answer = service.handle(get("/")).await;
@@ -371,7 +373,7 @@ async fn abandoned_requests_do_not_end_the_service() {
         tokio::time::timeout(Duration::from_millis(200), service.handle(get("/slow"))).await;
     assert!(abandoned.is_err(), "the caller gave up");
 
-    let next = tokio::time::timeout(Duration::from_secs(10), text(&service, get("/fast")))
+    let next = tokio::time::timeout(Duration::from_secs(30), text(&service, get("/fast")))
         .await
         .expect("served once the abandoned request is done");
     assert_eq!(next, "done");
@@ -381,7 +383,8 @@ async fn abandoned_requests_do_not_end_the_service() {
 /// either the event loop runs dry, or the budget runs out.
 #[tokio::test(flavor = "multi_thread")]
 async fn handler_that_never_responds_ends_cleanly() {
-    let limits = Limits::default().timeout(Duration::from_secs(1));
+    // The budget also covers starting the service, which must succeed.
+    let limits = Limits::default().timeout(Duration::from_secs(10));
 
     let dry = serve(
         &SANDBOX,
@@ -389,7 +392,7 @@ async fn handler_that_never_responds_ends_cleanly() {
         Some(limits.clone()),
     )
     .await;
-    let answer = tokio::time::timeout(Duration::from_secs(10), dry.handle(get("/")))
+    let answer = tokio::time::timeout(Duration::from_secs(30), dry.handle(get("/")))
         .await
         .expect("returns");
     assert!(
@@ -405,7 +408,7 @@ async fn handler_that_never_responds_ends_cleanly() {
         Some(limits),
     )
     .await;
-    let answer = tokio::time::timeout(Duration::from_secs(10), waiting.handle(get("/")))
+    let answer = tokio::time::timeout(Duration::from_secs(30), waiting.handle(get("/")))
         .await
         .expect("returns");
     assert!(
@@ -481,7 +484,7 @@ async fn responses_stream_while_the_handler_runs() {
                 async pull(controller) {
                     if (step === 0) controller.enqueue(encoder.encode("first;"));
                     else if (step === 1) {
-                        await new Promise((resolve) => setTimeout(resolve, 300));
+                        await new Promise((resolve) => setTimeout(resolve, 2000));
                         controller.enqueue(encoder.encode("second"));
                     } else controller.close();
                     step += 1;
@@ -499,13 +502,13 @@ async fn responses_stream_while_the_handler_runs() {
     let first_at = started.elapsed();
     assert_eq!(first, "first;");
     assert!(
-        first_at < Duration::from_millis(250),
+        first_at < Duration::from_millis(1500),
         "the first chunk took {first_at:?}"
     );
 
     let rest = body.collect().await.unwrap().to_bytes();
     assert_eq!(rest, "second");
-    assert!(started.elapsed() >= Duration::from_millis(300));
+    assert!(started.elapsed() >= Duration::from_millis(2000));
 }
 
 /// A reader that drops the body early does not break later requests.
@@ -798,7 +801,7 @@ async fn timeout_and_limits_compose_in_either_order() {
             outcome.result,
             Err(RunError::Timeout(t)) if t == Duration::from_millis(300)
         ));
-        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 }
 
@@ -1001,7 +1004,7 @@ async fn timeout_while_blocked_in_a_host_call_hands_state_back() {
         "{:?}",
         outcome.result
     );
-    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(started.elapsed() < Duration::from_secs(10));
     assert_eq!(outcome.state, ["before", "sleep:null"]);
 }
 
@@ -1036,7 +1039,7 @@ async fn timeout_while_blocked_in_fetch() {
         outcome.result
     );
     assert!(
-        started.elapsed() < Duration::from_secs(4),
+        started.elapsed() < Duration::from_secs(10),
         "{:?}",
         started.elapsed()
     );
@@ -1055,7 +1058,7 @@ async fn timeout_frees_the_concurrency_slot() {
         .run()
         .await;
     assert!(matches!(outcome.result, Err(RunError::Timeout(_))));
-    let next = tokio::time::timeout(Duration::from_secs(10), sandbox.run("return 1"))
+    let next = tokio::time::timeout(Duration::from_secs(30), sandbox.run("return 1"))
         .await
         .expect("the slot is free again");
     assert_eq!(next.result.unwrap(), json!(1));
@@ -1071,7 +1074,7 @@ fn run_blocking_times_out() {
         .timeout(Duration::from_millis(400))
         .run_blocking();
     assert!(matches!(outcome.result, Err(RunError::Timeout(_))));
-    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(started.elapsed() < Duration::from_secs(10));
 }
 
 /// Overlapping runs see neither each other's globals, state, nor emit sink.

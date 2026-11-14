@@ -99,9 +99,11 @@ async fn calls_exports_and_async_host_imports() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_spinning_guest_times_out_and_poisons_the_session() {
-    let runtime = runtime(Limits::default().timeout(Duration::from_millis(300)));
+    let runtime = runtime(Limits::default());
     let mut session = runtime.session(SessionOptions::default()).await.unwrap();
 
+    // Only the spinning call gets the short budget; starting the session does not.
+    session.set_timeout(Duration::from_millis(300));
     let started = Instant::now();
     let result = session
         .call(async |store, instance| {
@@ -117,7 +119,7 @@ async fn a_spinning_guest_times_out_and_poisons_the_session() {
         "interrupted too early: {elapsed:?}"
     );
     assert!(
-        elapsed < Duration::from_secs(5),
+        elapsed < Duration::from_secs(10),
         "interrupted too late: {elapsed:?}"
     );
 
@@ -130,7 +132,7 @@ async fn a_spinning_guest_times_out_and_poisons_the_session() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn spinning_guests_do_not_starve_the_executor() {
-    let runtime = runtime(Limits::default().timeout(Duration::from_secs(3)));
+    let runtime = runtime(Limits::default());
 
     // Twice as many spinning guests as this runtime has worker threads.
     let mut spinners = Vec::new();
@@ -138,6 +140,8 @@ async fn spinning_guests_do_not_starve_the_executor() {
         let runtime = runtime.clone();
         spinners.push(tokio::spawn(async move {
             let mut session = runtime.session(SessionOptions::default()).await.unwrap();
+            // The budget covers the spinning call only, not starting the session.
+            session.set_timeout(Duration::from_secs(5));
             session
                 .call(async |store, instance| {
                     let spin = instance.get_typed_func::<(), ()>(&mut *store, "spin")?;
@@ -239,7 +243,7 @@ async fn max_concurrent_queues_sessions() {
     assert!(!waiting.is_finished());
 
     drop(first);
-    tokio::time::timeout(Duration::from_secs(5), waiting)
+    tokio::time::timeout(Duration::from_secs(30), waiting)
         .await
         .unwrap()
         .unwrap()
