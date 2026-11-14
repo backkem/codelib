@@ -43,7 +43,8 @@
     "test": "npm run build && npm run test:unit && npm run test:browser && npm run build:demo && npm run test:demo"
   },
   "dependencies": {
-    "@bytecodealliance/jco": "1.42.0"
+    "@bytecodealliance/jco": "1.42.0",
+    "@bytecodealliance/jco-transpile": "0.24.0"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

@@ -19,8 +19,10 @@ tell when it can go, and which test in this package covers it.
 
 ## Moving the pin
 
-1. Bump `@bytecodealliance/jco` in `package.json` and `JCO_VERSION` / `JCO_TRANSPILE_VERSION` in
-   `src/transpile/index.ts` (the lockfile decides the jco-transpile version).
+1. Bump `@bytecodealliance/jco` and `@bytecodealliance/jco-transpile` in `package.json` (the
+   latter is a direct, exact dependency so that a consumer's install resolves jco's caret range to
+   the pinned generator), and `JCO_VERSION` / `JCO_TRANSPILE_VERSION` in
+   `src/transpile/index.ts`.
 2. Run the tests. Every patch whose anchor moved fails by name; read the new output around it and
    decide, per entry below, whether the defect is still there.
 3. Update this file: an entry per patch, including the ones you drop and why.
