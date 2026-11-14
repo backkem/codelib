@@ -1,0 +1,60 @@
+package codelib:runtime@0.1.0;
+
+/// Types shared by the script entry points.
+interface types {
+    /// A named piece of JavaScript source. The name shows up in stack traces.
+    record source {
+        name: string,
+        code: string,
+    }
+
+    /// An uncaught exception from a script.
+    record script-error {
+        name: string,
+        message: string,
+        stack: option<string>,
+    }
+}
+
+/// Capabilities the embedder exposes to scripts, behind one generic call.
+/// Payloads are JSON text.
+interface host {
+    record failure {
+        /// Stable, machine-readable: `unknown-method`, `bad-args`, `denied`, ...
+        code: string,
+        message: string,
+        hint: option<string>,
+        /// Optional structured detail, as JSON.
+        detail: option<string>,
+    }
+
+    /// Call a host method. Blocks the script until the host answers.
+    call: func(method: string, args: string) -> result<string, failure>;
+
+    /// Send a progress or stream item to the embedder right now. Not part of
+    /// the script's result.
+    emit: func(kind: string, item: string);
+}
+
+/// The standard codelib world: a JavaScript engine that evaluates programs
+/// handed to it as text.
+world script {
+    use types.{source, script-error};
+
+    import host;
+    import wasi:http/outgoing-handler@0.2.12;
+    import wasi:cli/stdout@0.2.12;
+    import wasi:cli/stderr@0.2.12;
+
+    /// Evaluate `preludes` in order, then `program`, and return the program's
+    /// value as JSON (`null` when it returns nothing). `input` is JSON and is
+    /// visible to the script as `host.input`.
+    export run: func(preludes: list<source>, program: source, input: string) -> result<string, script-error>;
+
+    /// Like `run`, but the program must register a request handler
+    /// (`host.serve(fn)` or `addEventListener("fetch", ...)`). The instance
+    /// then stays warm and answers `incoming-handler#handle` calls.
+    export serve: func(preludes: list<source>, program: source, input: string) -> result<string, script-error>;
+
+    export wasi:http/incoming-handler@0.2.12;
+}

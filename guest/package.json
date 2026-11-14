@@ -1,0 +1,15 @@
+{
+  "name": "codelib-guest",
+  "private": true,
+  "type": "module",
+  "description": "Builds codelib-guest.wasm: StarlingMonkey + runtime-wrapper.js as a codelib:runtime/script component.",
+  "scripts": {
+    "build": "node --import ./patch-bindings.mjs node_modules/@bytecodealliance/jco/dist/jco.js componentize runtime-wrapper.js --wit ../wit/ --world-name script -o codelib-guest.wasm"
+  },
+  "devDependencies": {
+    "@bytecodealliance/componentize-js": "0.23.0",
+    "@bytecodealliance/jco": "1.42.0",
+    "acorn": "8.17.0",
+    "acorn-walk": "8.3.5"
+  }
+}

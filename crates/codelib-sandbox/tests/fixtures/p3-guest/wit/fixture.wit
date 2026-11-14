@@ -1,0 +1,65 @@
+package codelib:p3-fixture;
+
+/// A WASI 0.3 guest for the host kit's tests. Every async export runs as its
+/// own component-model task, so a host can start several at once.
+world fixture {
+    /// What the guest saw through WASI 0.3.
+    record observation {
+        wall-seconds: s64,
+        wall-nanoseconds: u32,
+        monotonic: u64,
+        random: list<u8>,
+        insecure: list<u8>,
+        insecure-seed: tuple<u64, u64>,
+        env: list<tuple<string, string>>,
+        args: list<string>,
+    }
+
+    /// What the guest got when it reached for ambient authority.
+    record sealed {
+        preopens: u32,
+        tcp-connect: string,
+        name-lookup: string,
+    }
+
+    /// An outgoing `wasi:http` 0.3 request.
+    record outgoing {
+        method: string,
+        scheme: string,
+        authority: string,
+        path: string,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+
+    /// The response, read whole.
+    record incoming {
+        status: u16,
+        body: list<u8>,
+    }
+
+    /// Provided by the host: answers `x * 2` after `ms` milliseconds.
+    import double-later: async func(ms: u32, x: u32) -> u32;
+
+    /// A synchronous export.
+    export add: func(a: u32, b: u32) -> u32;
+    /// Returns its argument.
+    export echo: async func(s: string) -> string;
+    /// Awaits the host's `double-later`.
+    export twice-later: async func(ms: u32, x: u32) -> u32;
+    /// Sleeps on the 0.3 monotonic clock; returns how far that clock moved.
+    export sleep: async func(ms: u64) -> u64;
+    /// Never returns.
+    export spin: async func();
+    /// Writes `out` to stdout and `err` to stderr through `wasi:cli` 0.3.
+    export print: async func(out: string, err: string);
+    /// Reads clocks, randomness, environment and arguments.
+    export observe: async func() -> observation;
+    /// Allocates and touches `bytes` bytes. Fallibly: returns whether it
+    /// got them. Otherwise an allocation failure aborts the guest.
+    export allocate: async func(bytes: u64, fallible: bool) -> bool;
+    /// Tries the filesystem and the network outside `wasi:http`.
+    export probe: async func() -> sealed;
+    /// Sends a request with `wasi:http/client` 0.3.
+    export fetch: async func(request: outgoing) -> result<incoming, string>;
+}

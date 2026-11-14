@@ -1,0 +1,45 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/backkem/codelib"
+
+[workspace.dependencies]
+# Workspace crates
+codelib = { path = "crates/codelib", version = "0.1.0" }
+codelib-guest = { path = "crates/codelib-guest", version = "0.1.0" }
+codelib-http = { path = "crates/codelib-http", version = "0.1.0" }
+codelib-rpc = { path = "crates/codelib-rpc", version = "0.1.0" }
+codelib-sandbox = { path = "crates/codelib-sandbox", version = "0.1.0" }
+
+# Wasmtime (latest stable)
+wasmtime = "50"
+wasmtime-wasi = { version = "50", default-features = false, features = ["p2"] }
+# No `default-send-request`: outgoing requests go through codelib-http.
+wasmtime-wasi-http = { version = "50", default-features = false, features = ["p2"] }
+
+# Shared
+bytes = "1"
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+tokio = "1"
+tracing = "0.1"
+
+[profile.release]
+lto = "thin"
+
+# The compile cache hashes the 13 MB engine and checks a 40 MB entry on every
+# sandbox build; unoptimised, that costs about half a second in debug builds.
+[profile.dev.package.crc32fast]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3

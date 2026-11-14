@@ -1,0 +1,26 @@
+# The WASI 0.3 guest behind `tests/p3.rs`. Built by `build.sh` into
+# `../p3-guest.wasm`, which is checked in; the tests never build it.
+[package]
+name = "codelib-p3-fixture"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Pinned together: both must agree with wasmtime 50 on the async ABI.
+wit-bindgen = { version = "=0.61.1", default-features = false, features = ["macros", "realloc", "async"] }
+wasip3 = { version = "=0.8.0", default-features = false, features = ["std"] }
+
+[profile.release]
+opt-level = "s"
+debug = false
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
+
+# Not a member of the codelib workspace: it only builds for wasm32-wasip2.
+[workspace]

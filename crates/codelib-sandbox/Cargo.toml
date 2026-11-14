@@ -1,0 +1,54 @@
+[package]
+name = "codelib-sandbox"
+description = "World-agnostic wasmtime host kit: compile cache, limits, deadlines, console capture and egress for sandboxed components."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["http"]
+# Link `wasi:http` and route outgoing requests through a `codelib_http::Egress`.
+http = [
+    "dep:wasmtime-wasi-http",
+    "dep:codelib-http",
+    "dep:http",
+    "dep:http-body",
+    "dep:http-body-util",
+    "dep:bytes",
+]
+# WASI 0.3 next to 0.2: the async component model, `wasi:cli`, `wasi:clocks`,
+# `wasi:random`, ... at 0.3.0 (plus `wasi:http` 0.3 when `http` is on), and
+# `Session::call_concurrent` for async exports.
+p3 = [
+    "wasmtime/component-model-async",
+    "wasmtime-wasi/p3",
+    "wasmtime-wasi-http?/p3",
+]
+
+[dependencies]
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
+wasmtime-wasi-http = { workspace = true, optional = true }
+codelib-http = { workspace = true, optional = true }
+
+bytes = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+http-body = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
+
+dirs = "6"
+rand = { version = "0.10", default-features = false, features = ["std_rng"] }
+crc32fast = "1.4"
+sha2 = "0.10"
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "sync", "time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread"] }
+tempfile = "3"
+
+[[test]]
+name = "p3"
+required-features = ["p3", "http"]

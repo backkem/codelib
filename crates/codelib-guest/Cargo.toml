@@ -1,0 +1,11 @@
+[package]
+name = "codelib-guest"
+description = "The prebuilt codelib guest: a JavaScript engine component implementing the codelib:runtime/script world."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+include = ["src/**", "codelib-guest.wasm", "codelib-guest.wasm.sha256"]
+
+[dev-dependencies]
+sha2 = "0.10"

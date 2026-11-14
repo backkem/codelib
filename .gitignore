@@ -1,0 +1,7 @@
+/target
+node_modules/
+*.cwasm
+*.gen.js
+.DS_Store
+/guest/codelib-guest.wasm
+/.claude/

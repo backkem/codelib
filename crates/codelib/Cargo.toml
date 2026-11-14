@@ -1,0 +1,48 @@
+[package]
+name = "codelib"
+description = "Run agent-written JavaScript in a wasmtime sandbox, with host calls and policy-controlled HTTP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["embedded-guest"]
+# Embed the prebuilt JavaScript engine component (about 13 MB), so no guest
+# has to be supplied.
+embedded-guest = ["dep:codelib-guest"]
+# WASI 0.3 in the host kit (`codelib-sandbox/p3`). The embedded engine is a
+# 0.2 component; this is for hosting your own 0.3 components through
+# `codelib::sandbox`.
+p3 = ["codelib-sandbox/p3"]
+
+[dependencies]
+codelib-guest = { workspace = true, optional = true }
+codelib-http.workspace = true
+codelib-rpc.workspace = true
+codelib-sandbox.workspace = true
+
+bytes.workspace = true
+http.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread"] }
+
+[[example]]
+name = "minictl"
+path = "../../examples/minictl.rs"
+
+[[example]]
+name = "notes"
+path = "../../examples/notes.rs"
+
+[[example]]
+name = "custom_world"
+path = "../../examples/custom_world.rs"

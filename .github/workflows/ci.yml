@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: lint
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Lints
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+  # The engine component is checked in (crates/codelib-guest), so the other
+  # jobs need no Node. This job proves it can still be rebuilt from guest/
+  # and that the fresh build passes the end-to-end tests.
+  guest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: guest/package-lock.json
+
+      - name: Build the guest component
+        run: sh guest/build.sh
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: guest
+
+      - name: Test against the fresh build
+        run: cargo test --locked -p codelib-guest -p codelib
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: codelib-guest
+          path: |
+            crates/codelib-guest/codelib-guest.wasm
+            crates/codelib-guest/codelib-guest.wasm.sha256
+          retention-days: 7
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: test
+
+      - name: Tests
+        run: cargo test --workspace --all-features --locked
+
+      - name: Examples
+        run: |
+          cargo run --locked --example notes
+          cargo run --locked --example custom_world
+          cargo run --locked --example minictl -- -e "return 6 * 7"

@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # minictl, the example CLI, built for every platform. The engine component
+  # is checked in and embedded, so no Node is needed here.
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: .exe
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            ext: ""
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            ext: ""
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            ext: ""
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            ext: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build minictl
+        run: >
+          cargo build --release --locked
+          --target ${{ matrix.target }}
+          -p codelib --example minictl
+
+      - name: Package
+        shell: bash
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          # workflow_dispatch runs on a branch, not a tag
+          if [ "$tag" = "$GITHUB_REF" ]; then tag="dev-${GITHUB_SHA:0:7}"; fi
+          dir="minictl-${tag}-${{ matrix.target }}"
+          mkdir "$dir"
+          cp "target/${{ matrix.target }}/release/examples/minictl${{ matrix.ext }}" "$dir/"
+          cp README.md LICENSE "$dir/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "${dir}.zip" "$dir" >/dev/null
+            archive="${dir}.zip"
+          else
+            tar czf "${dir}.tar.gz" "$dir"
+            archive="${dir}.tar.gz"
+          fi
+          # sha256sum on Linux + Git bash, shasum on macOS
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$archive" > "${archive}.sha256"
+          else
+            shasum -a 256 "$archive" > "${archive}.sha256"
+          fi
+          ls -lh minictl-*
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            minictl-*.tar.gz
+            minictl-*.zip
+            minictl-*.sha256
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      # For the engine component, published next to the binaries.
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: |
+            minictl-*.tar.gz
+            minictl-*.zip
+            minictl-*.sha256
+            crates/codelib-guest/codelib-guest.wasm
+            crates/codelib-guest/codelib-guest.wasm.sha256
