@@ -3,6 +3,10 @@
 // default example and a drawing example, stop an endless loop, and run the credentials example.
 //
 //   node test/demo/run.mjs
+//
+// With DEMO_URL set it tests a deployed site instead of the local build:
+//
+//   DEMO_URL=https://backkem.github.io/codelib/ node test/demo/run.mjs
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,13 +17,14 @@ import { serve } from '../../scripts/serve.mjs';
 
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const site = path.join(web, 'demo/dist');
-if (!fs.existsSync(path.join(site, 'main.js'))) {
+const deployed = process.env.DEMO_URL;
+if (!deployed && !fs.existsSync(path.join(site, 'main.js'))) {
   console.error('demo/dist is not built: run `npm run build:demo` first');
   process.exit(2);
 }
 
-const server = await serve(site, { port: 0 });
-const url = `http://127.0.0.1:${server.address().port}/codelib/`;
+const server = deployed ? null : await serve(site, { port: 0 });
+const url = deployed ?? `http://127.0.0.1:${server.address().port}/codelib/`;
 const executablePath = process.env.CHROMIUM ?? (fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
 const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
 const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
@@ -104,7 +109,7 @@ await step('the page made no external requests', async () => {
 });
 
 await browser.close();
-server.close();
+server?.close();
 if (errors.length > 0) console.log(`page errors:\n  ${errors.join('\n  ')}`);
 const failed = steps.filter((s) => !s.ok).length;
 fs.mkdirSync(path.join(web, 'test-results'), { recursive: true });
