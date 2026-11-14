@@ -37,7 +37,10 @@
     "prepack": "tsc -p .",
     "test:unit": "node --test \"test/unit/*.test.mjs\"",
     "test:browser": "node test/browser/run.mjs",
-    "test": "npm run build && npm run test:unit && npm run test:browser"
+    "build:demo": "node scripts/build-demo.mjs && tsc -p demo",
+    "serve:demo": "node scripts/serve.mjs demo/dist 8080 /codelib/",
+    "test:demo": "node test/demo/run.mjs",
+    "test": "npm run build && npm run test:unit && npm run test:browser && npm run build:demo && npm run test:demo"
   },
   "dependencies": {
     "@bytecodealliance/jco": "1.42.0"

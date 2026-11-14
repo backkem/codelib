@@ -1,0 +1,65 @@
+name: Pages
+
+# Builds the playground (web/demo: codelib's guest component transpiled with codelib-web, the
+# kit's browser modules and the page) and deploys it to https://backkem.github.io/codelib/.
+# Repository settings: Pages > Build and deployment > Source: GitHub Actions.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Build the kit
+        run: npm run build
+
+      - name: Build the playground
+        run: npm run build:demo
+
+      - name: Install Chromium
+        run: npx playwright-core install --with-deps chromium-headless-shell
+
+      - name: Test the playground
+        run: npm run test:demo
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: web/demo/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -101,14 +101,26 @@ Everything runs on Node 24 with Chromium:
 ```sh
 npm ci
 npx playwright-core install chromium-headless-shell   # or set CHROMIUM=/path/to/chromium
-npm test        # build, unit tests (Node), browser tests (headless Chromium)
+npm test        # build, unit tests (Node), browser tests and the playground (headless Chromium)
 ```
 
 The unit tests check the patches against jco's real output, the version pin, the loop, the
 worlds and the egress decisions. The browser tests run a WASI 0.3 fixture
 (`test/fixtures/clock-p3`, rebuilt by `test/fixtures/build.sh`) in both worlds, a composed
 fixture (`pair-p3`), codelib's guest (values, `await`, console, `host.call`, errors, deadline) and
-the egress policy against a local server and a virtual host.
+the egress policy against a local server and a virtual host. The playground test loads the built
+site under `/codelib/`, runs examples and checks the canvas, Stop and the credential example.
+
+## The playground
+
+[`demo/`](demo) is the page behind the "try it" link: an editor, examples, and a small drawing API
+(`draw.line`, `circle`, `text`, `clear`, `size`) that the page exposes to scripts through
+`host.call`, plus an egress policy with one real host and one virtual host that gets a credential
+the script never sees. `.github/workflows/pages.yml` builds and deploys it. Locally:
+
+```sh
+npm run build && npm run build:demo && npm run serve:demo   # http://127.0.0.1:8080/codelib/
+```
 
 ## Using it before it is on npm
 

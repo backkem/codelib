@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>codelib playground</title>
+  <meta name="description" content="Run JavaScript in codelib's WebAssembly sandbox, in your browser.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='14' height='14' rx='3' fill='%235b5bd6'/%3E%3Cpath d='M5 5l-2 3 2 3M11 5l2 3-2 3' stroke='white' stroke-width='1.5' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    { "imports": { "codelib-web/script": "./kit/script/index.js" } }
+  </script>
+  <script type="module" src="main.js"></script>
+</head>
+<body>
+  <header>
+    <h1>codelib <span>playground</span></h1>
+    <p class="tagline">Write a small JavaScript program, press Run: it executes inside the codelib sandbox, in your browser.</p>
+    <p class="fine">
+      Runs entirely in this tab: StarlingMonkey compiled to WebAssembly, in a Web Worker. Needs a
+      Chromium-based browser. The native library enforces more (a memory cap, fuel, a full egress
+      policy) than this demo, which only enforces a deadline.
+      <a href="https://github.com/backkem/codelib">Source on GitHub</a>
+    </p>
+  </header>
+
+  <div id="loading" class="loading">
+    <span>Downloading and compiling the engine (about 13 MB)…</span>
+    <progress id="progress"></progress>
+  </div>
+
+  <main>
+    <section class="editor">
+      <div class="toolbar">
+        <label for="example">Example</label>
+        <select id="example"></select>
+        <span class="spacer"></span>
+        <button id="stop" type="button" disabled>Stop</button>
+        <button id="run" type="button" class="primary" disabled>Run <kbd>Ctrl</kbd><kbd>↵</kbd></button>
+      </div>
+      <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Program"></textarea>
+      <p id="status" class="status" role="status">loading…</p>
+    </section>
+
+    <section class="output">
+      <div class="panel">
+        <h2>Result <span id="elapsed" class="elapsed"></span></h2>
+        <pre id="value" class="value"></pre>
+      </div>
+      <div class="panel">
+        <h2>Console</h2>
+        <pre id="console" class="console"></pre>
+      </div>
+      <div class="panel canvas-panel">
+        <h2>Canvas <span class="hint">the page's own API: <code>draw.line</code>, <code>circle</code>, <code>text</code>, <code>clear</code>, <code>size</code></span></h2>
+        <canvas id="canvas" width="800" height="800" aria-label="Drawing made by the program"></canvas>
+      </div>
+      <div class="panel">
+        <h2>What the script may reach</h2>
+        <ul id="policy" class="policy"></ul>
+        <p class="hint">
+          The token for <code>vault.internal</code> lives in this page's JavaScript, outside the
+          sandbox: it is attached to requests on their way out, so the script can use the service
+          without ever holding the credential.
+        </p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
