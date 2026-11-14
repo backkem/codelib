@@ -1,0 +1,24 @@
+# Test fixture for codelib-web: two WASI 0.3 components composed into one (`build.sh` plugs
+# `callee` into `caller` with wac), so the transpiled output contains jco's guest-to-guest call
+# machinery. Its own workspace: not part of codelib's Rust workspace.
+[workspace]
+resolver = "3"
+members = ["callee", "caller"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+wasip3 = { version = "=0.8.0", default-features = false, features = ["std"] }
+wit-bindgen = { version = "=0.61.1", default-features = false, features = ["macros", "realloc", "async", "std"] }
+
+[profile.release]
+opt-level = "s"
+debug = false
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"

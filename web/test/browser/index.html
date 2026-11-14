@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>codelib-web tests</title>
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <pre id="log">codelib-web browser tests (driven by test/browser/run.mjs)</pre>
+  <script type="module">
+    import * as kit from './tests.js';
+    import './script-tests.js';
+    window.testNames = kit.names;
+    window.runTest = kit.run;
+    window.ready = true;
+  </script>
+</body>
+</html>

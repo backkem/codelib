@@ -70,6 +70,38 @@ jobs:
             crates/codelib-guest/codelib-guest.wasm.sha256
           retention-days: 7
 
+  # The browser host kit (web/): unit tests under Node, then the browser tests in headless
+  # Chromium, against the checked-in guest component. The Rust jobs do not depend on it.
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright-core install --with-deps chromium-headless-shell
+
+      - name: Build and test
+        run: npm test
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: web-test-results
+          path: web/test-results
+          retention-days: 7
+
   test:
     strategy:
       fail-fast: false

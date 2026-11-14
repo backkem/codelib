@@ -1,0 +1,50 @@
+{
+  "name": "codelib-web",
+  "version": "0.1.0",
+  "description": "Browser host kit for WebAssembly components: runs jco-transpiled components in a Worker, with an embedder-driven event loop, virtual WASI 0.2/0.3 and a wall-clock deadline.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/backkem/codelib.git",
+    "directory": "web"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "codelib-web": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./loop": "./dist/loop.js",
+    "./wasi": "./dist/wasi/index.js",
+    "./worlds": "./dist/worlds.js",
+    "./load": "./dist/load.js",
+    "./worker": "./dist/worker/index.js",
+    "./script": "./dist/script/index.js",
+    "./script/worker": "./dist/script/worker.js",
+    "./transpile": "./dist/transpile/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p .",
+    "prepack": "tsc -p .",
+    "test:unit": "node --test \"test/unit/*.test.mjs\"",
+    "test:browser": "node test/browser/run.mjs",
+    "test": "npm run build && npm run test:unit && npm run test:browser"
+  },
+  "dependencies": {
+    "@bytecodealliance/jco": "1.42.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "playwright-core": "1.64.0",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,18 @@
+package test:pair;
+
+/// What `callee` exports and `caller` imports: one async function and one sync function, so the
+/// composition has both an async and a sync guest-to-guest call.
+interface svc {
+    /// Yields a few times, then returns `n * 2`.
+    work: async func(n: u32) -> u32;
+    /// Returns `n + 1` at once.
+    ping: func(n: u32) -> u32;
+}
+
+world callee {
+    export svc;
+}
+
+world caller {
+    import svc;
+}

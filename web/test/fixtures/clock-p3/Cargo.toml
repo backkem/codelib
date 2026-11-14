@@ -1,0 +1,25 @@
+[package]
+name = "clock-p3"
+version = "0.0.0"
+description = "Test fixture for codelib-web: a WASI 0.3 command that reads the clocks, draws random numbers, sleeps and prints."
+edition = "2024"
+license = "MIT"
+publish = false
+
+# Its own workspace: this crate is a browser-test fixture, not part of codelib's Rust workspace.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+wasip3 = { version = "=0.8.0", default-features = false, features = ["std"] }
+
+[profile.release]
+opt-level = "s"
+debug = false
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"

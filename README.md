@@ -2,7 +2,8 @@
 
 <p align="center">
   <b>Give your agent a programming language, not a hundred tools.</b><br>
-  Sandboxed JavaScript for agents, in Rust, on WebAssembly.
+  Sandboxed JavaScript for agents, in Rust, on WebAssembly.<br>
+  <a href="https://backkem.github.io/codelib/">Try it in your browser</a>
 </p>
 
 ---
@@ -90,6 +91,7 @@ let notebook = outcome.state;   // handed back
 | [`codelib-rpc`](crates/codelib-rpc) | Method router behind `host.call`: typed handlers, guards, self-description, generated JS/TypeScript/Markdown. |
 | [`codelib-sandbox`](crates/codelib-sandbox) | The wasmtime host kit underneath: compile cache, deadlines, limits. Hosts any component and any WIT world, WASI 0.2 or (feature `p3`) 0.3. |
 | [`codelib-guest`](crates/codelib-guest) | The prebuilt engine component (StarlingMonkey), pinned by sha256. |
+| [`codelib-web`](web) | The browser host kit (an npm package, not a crate): runs jco-transpiled components in a Worker with virtual WASI and a deadline, and runs the JavaScript sandbox in a page. |
 
 Need a different WIT world, or no JavaScript at all? Use `codelib-sandbox`
 directly and keep the cache, limits and egress.
@@ -114,7 +116,9 @@ cargo run --example custom_world
 Scripts run on [StarlingMonkey](https://github.com/bytecodealliance/StarlingMonkey)
 (SpiderMonkey compiled to WebAssembly), hosted by
 [wasmtime](https://wasmtime.dev) 50 against WASI 0.2.12. The world is small:
-see [`wit/codelib.wit`](wit/codelib.wit).
+see [`wit/codelib.wit`](wit/codelib.wit). In the browser, [`codelib-web`](web) runs the same
+component, transpiled to JavaScript by [jco](https://github.com/bytecodealliance/jco), in a Web
+Worker; there only the deadline is enforced, not memory or fuel.
 
 With the `p3` feature, the host kit also links WASI 0.3.0, so your own
 components can use async exports and `wasi:http` 0.3 under the same limits
