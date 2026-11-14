@@ -1,6 +1,6 @@
 {
   "name": "codelib-web",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Browser host kit for WebAssembly components: runs jco-transpiled components in a Worker, with an embedder-driven event loop, virtual WASI 0.2/0.3 and a wall-clock deadline.",
   "license": "MIT",
   "type": "module",

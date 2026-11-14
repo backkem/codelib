@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // codelib-web transpile <component.wasm> -o <dir> --name <stem> [options]
+// codelib-web browser-files -o <dir>
 
 import { basename } from 'node:path';
 
+import { copyBrowserFiles } from './browser-files.js';
 import { JCO_TRANSPILE_VERSION, JCO_VERSION, PRESETS, kitVersion, transpile } from './transpile/index.js';
 
 const USAGE = `usage: codelib-web transpile <component.wasm> -o <dir> [--name <stem>] [options]
@@ -18,6 +20,11 @@ options:
   --no-wasi-async           do not make WASI 0.2's blocking functions async imports
   -q, --quiet               print nothing on success
 
+codelib-web browser-files -o <dir>
+                            copies the browser-side modules of the package (loop, worlds, wasi,
+                            load, jspi, worker, script, index) into <dir>, keeping their relative
+                            paths, for a Worker that cannot resolve codelib-web/... specifiers
+
 codelib-web version         prints the kit's and the pinned jco's versions`;
 
 function fail(message: string): never {
@@ -25,10 +32,29 @@ function fail(message: string): never {
   process.exit(2);
 }
 
+function browserFiles(args: string[]): void {
+  let outDir: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a === '-o' || a === '--out-dir') outDir = args[++i] ?? fail(`${a} needs a value`);
+    else fail(`unexpected argument ${a}
+
+${USAGE}`);
+  }
+  if (outDir === undefined) fail('no output directory given (-o <dir>)');
+  const files = copyBrowserFiles(outDir);
+  console.log(`codelib-web: copied ${files.length} browser modules to ${outDir}`);
+  for (const f of files) console.log(`  ${f}`);
+}
+
 async function main(argv: string[]): Promise<void> {
   const [command, ...rest] = argv;
   if (command === 'version' || command === '--version') {
     console.log(`codelib-web ${kitVersion()} (jco ${JCO_VERSION}, jco-transpile ${JCO_TRANSPILE_VERSION})`);
+    return;
+  }
+  if (command === 'browser-files') {
+    browserFiles(rest);
     return;
   }
   if (command !== 'transpile') {

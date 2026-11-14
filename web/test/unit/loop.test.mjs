@@ -3,7 +3,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { GLOBAL_NAME, IdleError, external, install, loopState, onIdle, settle, touch, until } from '../../dist/loop.js';
+import { GLOBAL_NAME, IdleError, external, install, loopState, onIdle, patient, settle, touch, until } from '../../dist/loop.js';
+import { virtualWorld } from '../../dist/worlds.js';
+
+const quiet = { stdout: () => {}, stderr: () => {} };
 
 install();
 const env = globalThis[GLOBAL_NAME];
@@ -82,4 +85,86 @@ test('until asks the idle handlers, then fails when nothing can progress', async
 
 test('until passes a rejection through', async () => {
   await assert.rejects(until(Promise.reject(new Error('boom'))), /boom/);
+});
+
+test('patient: a pending virtual timer fires first, and virtual time advances', async () => {
+  const world = virtualWorld({ seed: 1, ...quiet });
+  try {
+    const order = [];
+    let input;
+    const stdin = patient(new Promise((resolve) => (input = resolve)));
+    world.timer(5_000_000_000n, () => {
+      touch();
+      order.push(['timer', world.now()]);
+      // The input arrives in wall time, only once the timer is out of the way.
+      setTimeout(() => input('line'), 20);
+    });
+    const call = stdin.then((line) => {
+      order.push(['input', line]);
+      return line;
+    });
+    assert.equal(await until(call), 'line');
+    assert.deepEqual(order, [['timer', 5_000_000_000n], ['input', 'line']]);
+    assert.equal(world.now(), 5_000_000_000n);
+    assert.equal(loopState().patient, 0);
+  } finally {
+    world.dispose();
+  }
+});
+
+test('patient: with nothing else pending, until and settle wait for it and no IdleError is raised', async () => {
+  let input;
+  const stdin = patient(new Promise((resolve) => (input = resolve)));
+  setTimeout(() => input('typed'), 30);
+  assert.equal(await until(stdin), 'typed');
+
+  let late;
+  const later = patient(new Promise((resolve) => (late = resolve)));
+  let settled = false;
+  setTimeout(() => late(1), 30);
+  void later.then(() => (settled = true));
+  await settle();
+  assert.equal(settled, true, 'settle waited for the patient promise');
+  assert.equal(loopState().patient, 0);
+});
+
+test('patient: until returns when its call is done even though a patient promise is still pending', async () => {
+  let release;
+  patient(new Promise((resolve) => (release = resolve)));
+  assert.equal(await until(Promise.resolve('done')), 'done');
+  assert.equal(await until(new Promise((resolve) => env.setTimeout(() => resolve('queued'), 0))), 'queued');
+  assert.equal(loopState().patient, 1);
+  release();
+  await settle();
+});
+
+test('external keeps holding virtual time still while it is pending', async () => {
+  const world = virtualWorld({ seed: 2, ...quiet });
+  try {
+    let fired = false;
+    world.timer(1_000_000_000n, () => (fired = true));
+    let done = false;
+    external(new Promise((r) => setTimeout(r, 30))).then(() => (done = true));
+    await settle();
+    assert.equal(done, true);
+    assert.equal(fired, false, 'settle does not move the virtual clock');
+    assert.equal(world.now(), 0n);
+    await assert.rejects(until(new Promise(() => {})), IdleError, 'nothing patient is pending, so a stuck call is still a deadlock');
+  } finally {
+    world.dispose();
+  }
+});
+
+test('patient: a rejection does not break the loop', async () => {
+  const failing = patient(Promise.reject(new Error('input failed')));
+  await assert.rejects(failing, /input failed/);
+  assert.equal(await until(Promise.resolve(7)), 7);
+  await settle();
+
+  let reject;
+  const late = patient(new Promise((_, r) => (reject = r)));
+  late.catch(() => undefined);
+  setTimeout(() => reject(new Error('later')), 20);
+  await settle();
+  assert.equal(loopState().patient, 0);
 });

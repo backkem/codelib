@@ -10,7 +10,7 @@
 // of an interface into one object (wasi:clocks/monotonic-clock has `subscribe-duration` from 0.2
 // and `wait-for` from 0.3), so each object below serves both versions.
 
-import { touch } from '../loop.js';
+import { patient, touch } from '../loop.js';
 import type { World } from '../worlds.js';
 import { createHttp, denyAll, type HttpHandler } from './http.js';
 import { EMPTY, createIo, pullSource } from './io.js';
@@ -42,7 +42,13 @@ export function wasiImports(world: World, options: WasiOptions = {}): Record<str
 
   const stdout = new OutputStream((b) => world.stdout(b));
   const stderr = new OutputStream((b) => world.stderr(b));
-  const stdinSource = world.stdin ? pullSource(() => world.stdin!()) : EMPTY;
+  // Input that is not there yet is waited for `patient`ly: under a virtual clock an interactive
+  // guest always has a read pending, and its timers must still fire before the loop waits for it.
+  const nextStdin = () => {
+    const next = world.stdin!();
+    return next instanceof Promise ? patient(next) : next;
+  };
+  const stdinSource = world.stdin ? pullSource(nextStdin) : EMPTY;
   const stdin = new InputStream(stdinSource);
 
   const sleepUntil = (at: bigint): Promise<void> =>
@@ -83,7 +89,7 @@ export function wasiImports(world: World, options: WasiOptions = {}): Record<str
       try {
         if (!world.stdin) return;
         for (;;) {
-          const chunk = await world.stdin();
+          const chunk = await nextStdin();
           if (chunk === undefined) return;
           yield chunk;
         }

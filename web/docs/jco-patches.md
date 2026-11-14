@@ -24,7 +24,8 @@ tell when it can go, and which test in this package covers it.
    the pinned generator), and `JCO_VERSION` / `JCO_TRANSPILE_VERSION` in
    `src/transpile/index.ts`.
 2. Run the tests. Every patch whose anchor moved fails by name; read the new output around it and
-   decide, per entry below, whether the defect is still there.
+   decide, per entry below, whether the defect is still there. For the register patches (E) the
+   answer comes from the downstream embedder's composed-component scenarios, not from this package's tests.
 3. Update this file: an entry per patch, including the ones you drop and why.
 
 jco 1.42.0 embeds its component-model runtime in every output (functions prefixed
@@ -44,21 +45,21 @@ marked experimental and the kit does not use it yet.
 | `deterministic-mode` | ported | C: scheduling randomised on purpose | partly |
 | `no-coin-flips` | ported | C | unit (scan) |
 | `no-waitable-shuffle` | kept, now guards dead code | C | unit (scan) |
-| `deferred-start-task` | **dropped** | D: deferred async start without a current task | n/a (fixed upstream) |
-| `prepare-saves-registers` | ported | E: current-task register left on the wrong task | applies and runs; defect not reproduced |
-| `deferred-start-restores-registers` | ported | E | applies and runs; defect not reproduced |
-| `sync-call-saves-callee-register` | ported | E | applies and runs; defect not reproduced |
-| `sync-call-stacks-callee-register` | ported | E | applies and runs; defect not reproduced |
-| `sync-call-exit-restores-callee-register` | ported | E | applies and runs; defect not reproduced |
-| `sync-call-exit-restores-callee-register-2` | ported | E | applies and runs; defect not reproduced |
+| `deferred-start-task` | **dropped** | D: deferred async start without a current task | n/a (fixed upstream; a downstream scenario passes without it) |
+| `prepare-saves-registers` | ported | E: current-task register left on the wrong task | required (see E); gate lives with a downstream embedder |
+| `deferred-start-restores-registers` | ported | E | required (see E); gate lives with a downstream embedder |
+| `sync-call-saves-callee-register` | ported | E | required (see E); gate lives with a downstream embedder |
+| `sync-call-stacks-callee-register` | ported | E | required (see E); gate lives with a downstream embedder |
+| `sync-call-exit-restores-callee-register` | ported | E | required (see E); gate lives with a downstream embedder |
+| `sync-call-exit-restores-callee-register-2` | ported | E | required (see E); gate lives with a downstream embedder |
 
-"Applies and runs" means: the unit tests check that the patch applies to the transpiled
-composition `test/fixtures/pair-p3.wasm`, and the browser test `pair-p3` runs that composition
-through the patched code path (a deferred async start and a sync guest-to-guest call, confirmed
-from jco's own debug log) and checks its output. The defects themselves only showed with composed
-components under load (a component suspended in the middle of a callback while siblings call
-into it); no fixture here reproduces them, so nothing in this package fails without these
-patches. Their regression tests live with the embedder that found them.
+The unit tests check that each patch applies to the transpiled composition
+`test/fixtures/pair-p3.wasm`, and the browser test `pair-p3` runs that composition through the
+patched code path (a deferred async start and a sync guest-to-guest call, confirmed from jco's own
+debug log) and checks its output. That shows the patches apply and do no harm; it does not show
+that they are needed, because this package's own fixtures do not reproduce the defect. The
+evidence that they are needed is in section E, and the scenarios that gate them live with a
+downstream embedder.
 
 ## Defects and gaps behind the patches
 
@@ -132,7 +133,8 @@ later callback of that instance trapped "cannot leave component instance".
 - **`deferred-start-task`**: **dropped**. jco 1.42.0's deferred path calls
   `withCurrentTaskMeta({ taskID: preparedTask.id(), ... fn: startSubtask })`, which is exactly
   what this patch did. The `pair-p3` test runs a deferred start (confirmed from jco's debug log)
-  without it.
+  without it. A downstream scenario that needed this patch on jco 1.37.0 passes without it on
+  1.42.0.
 
 ### E. The current-task register is left on the wrong task
 
@@ -167,7 +169,19 @@ a dead task: its `context.set` goes nowhere and its waker state is lost, so it n
 1.42.0 restructured these functions (registers now carry a thread id; `withCurrentTaskMetaAsync`
 clears a register when an async callee finishes), but neither entry path restores what it
 replaced, and a resumed slice still does not re-establish its register, so both patches are
-ported to the new text. Upstream: not filed. A robust fix belongs in jco: re-establish the
+ported to the new text.
+
+**The defect is still present in 1.42.0 and the six patches are required.** Downstream,
+composed components re-transpiled with this kit's options but with these patches left out fail
+under load in scenarios where a component is suspended inside a callback while sibling
+components call into it (clients that half-close with their request while a load balancer checks
+its backends). Leaving out `prepare-saves-registers` and `deferred-start-restores-registers`
+breaks both of two such scenarios; leaving out the four `sync-call-*` patches breaks one of the
+two; with all six applied both pass. These scenarios live with a downstream embedder, not here,
+and they are the gate for these patches whenever the jco pin moves: this package's own fixtures
+do not reproduce the defect, so a green run here says nothing about it.
+
+Upstream: not filed. A robust fix belongs in jco: re-establish the
 register when a suspended slice resumes, or keep it per task stack. Drop these patches when jco
 does that; to check, run a composition whose callback-based component is suspended inside an
 import while siblings make async and sync calls into it (the defect showed as a component that

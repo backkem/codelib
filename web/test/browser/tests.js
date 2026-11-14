@@ -12,10 +12,10 @@ function check(cond, message) {
 }
 
 /** Runs the clock-p3 fixture (or another WASI 0.3 command) in a Worker. */
-function runFixture({ module = `${BUILD}/clock-p3/clock-p3.js`, args, seed, timeoutMs, trace } = {}) {
+function runFixture({ module = `${BUILD}/clock-p3/clock-p3.js`, args, seed, timeoutMs, trace, wrapCore } = {}) {
   const streamed = { stdout: '', stderr: '' };
   const run = runInWorker(new URL('./fixture-worker.js', import.meta.url), {
-    init: { module, args, seed, trace },
+    init: { module, args, seed, trace, wrapCore },
     timeoutMs,
     startTimeoutMs: 60_000,
     onMessage: ({ stream, chunk }) => (streamed[stream] += chunk),
@@ -105,6 +105,25 @@ test('pair-p3: a composition (async and sync guest-to-guest calls) runs patched'
   check(r.traced[trace[1]] >= 1, `no sync guest-to-guest call: ${JSON.stringify(r.traced)}`);
   const real = ok((await runFixture({ module: `${BUILD}/pair-p3/pair-p3.js` })).outcome);
   check(real.stdout === 'work=2,4 ping=6\n', `real world stdout: ${JSON.stringify(real.stdout)}`);
+});
+
+test('load: an instantiateCore hook sees every core instantiation and the run still works', async () => {
+  const r = ok((await runFixture({ module: `${BUILD}/pair-p3/pair-p3.js`, seed: 3, wrapCore: true })).outcome);
+  check(r.failed === null, `run failed: ${r.failed}`);
+  check(r.stdout === 'work=2,4 ping=6\n', `stdout: ${JSON.stringify(r.stdout)}`);
+  check(r.coreCalls >= 2, `the hook was called ${r.coreCalls} times for a composition of several core modules`);
+  const plain = ok((await runFixture({ module: `${BUILD}/pair-p3/pair-p3.js`, seed: 3 })).outcome);
+  check(plain.coreCalls === 0, 'without the option the hook is not involved');
+  return { coreCalls: r.coreCalls };
+});
+
+test('load: exportNames lists the exports in the forms exportFn accepts', async () => {
+  const r = ok((await runFixture({ args: ['clock-p3', 'probe', '1'], seed: 1 })).outcome);
+  check(
+    JSON.stringify(r.exportNames) === JSON.stringify(['wasi:cli/run@0.3.0', 'wasi:cli/run@0.3.0#run']),
+    `export names: ${JSON.stringify(r.exportNames)}`,
+  );
+  return { exportNames: r.exportNames };
 });
 
 export const names = () => [...tests.keys()];

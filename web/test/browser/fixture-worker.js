@@ -21,11 +21,21 @@ serveRun(async (init, ctx) => {
     text[stream] += chunk;
     ctx.post({ stream, chunk });
   };
-  const options = { args: init.args, env: init.env, stdout: sink('stdout'), stderr: sink('stderr') };
-  const world = init.seed !== undefined ? virtualWorld({ seed: BigInt(init.seed), ...options }) : realWorld(options);
+  const worldOptions = { args: init.args, env: init.env, stdout: sink('stdout'), stderr: sink('stderr') };
+  const world = init.seed !== undefined ? virtualWorld({ seed: BigInt(init.seed), ...worldOptions }) : realWorld(worldOptions);
 
   const t0 = performance.now();
-  const instance = await instantiate(init.module, wasiImports(world));
+  // `wrapCore` passes an `instantiateCore` that counts its calls and delegates to the default.
+  let coreCalls = 0;
+  const options = init.wrapCore
+    ? {
+        instantiateCore: (module, importObject) => {
+          coreCalls++;
+          return WebAssembly.instantiate(module, importObject);
+        },
+      }
+    : {};
+  const instance = await instantiate(init.module, wasiImports(world), options);
   const t1 = performance.now();
   ctx.running();
   let failed = null;
@@ -35,5 +45,5 @@ serveRun(async (init, ctx) => {
     failed = `${error?.name}: ${error?.message}`;
   }
   const t2 = performance.now();
-  return { ...text, failed, traced, instantiateMs: t1 - t0, runMs: t2 - t1 };
+  return { ...text, failed, traced, coreCalls, exportNames: instance.exportNames(), instantiateMs: t1 - t0, runMs: t2 - t1 };
 });

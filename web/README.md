@@ -17,10 +17,10 @@ Chromium-based browsers only: jco's async runtime and the kit's blocking waits n
 | Import | What |
 |---|---|
 | `codelib-web transpile` (CLI), `codelib-web/transpile` | Component in, a directory of patched JS and core modules out, with the pinned jco 1.42.0. Fails on any other jco and when a patch no longer applies ([docs/jco-patches.md](docs/jco-patches.md)). |
-| `codelib-web/loop` | The event loop the patched output runs on (`globalThis.__codelibWeb`): `install()`, `settle()`, `touch()`, `until(promise)`, `external(promise)`, `onIdle(handler)`. |
-| `codelib-web/wasi` | `wasiImports(world, { http })`: WASI 0.2.x and 0.3.0 clocks, random, cli (stdio, environment, exit, terminals), `wasi:config/store`, io streams for stdio, an empty filesystem (no preopens) and the client side of `wasi:http` over a handler that denies everything by default. `egress(policy)` builds a handler from an allowlist. No sockets. |
+| `codelib-web/loop` | The event loop the patched output runs on (`globalThis.__codelibWeb`): `install()`, `settle()`, `touch()`, `until(promise)`, `external(promise)`, `patient(promise)`, `onIdle(handler)`. |
+| `codelib-web/wasi` | `wasiImports(world, { http })`: WASI 0.2.x and 0.3.0 clocks, random, cli (stdio, environment, exit, terminals), `wasi:config/store`, io streams for stdio (a write may be up to 64 KiB: `output-stream.check-write` grants that much, so a larger write arrives in several chunks), an empty filesystem (no preopens) and the client side of `wasi:http` over a handler that denies everything by default. `egress(policy)` builds a handler from an allowlist. No sockets. |
 | `codelib-web/worlds` | The `World` interface the WASI imports read from, and two built-in worlds (below). |
-| `codelib-web/load` | `instantiate(moduleUrl, imports)`: loads a transpiled component, maps jco's naming quirks (unversioned, merged interface names; camel-cased exports) and calls exports by WIT name (`instance.call('wasi:cli/run@0.3.0#run')`). `hasJspi()` / `requireJspi()` with a clear message. |
+| `codelib-web/load` | `instantiate(moduleUrl, imports, { instantiateCore })`: loads a transpiled component, maps jco's naming quirks (unversioned, merged interface names; camel-cased exports), calls exports by WIT name (`instance.call('wasi:cli/run@0.3.0#run')`) and lists them (`instance.exportNames('app-')`). `instantiateCore` is passed to jco's generated `instantiate` as its core-instantiation hook (default `WebAssembly.instantiate`), for components that instantiate core modules themselves at run time. `hasJspi()` / `requireJspi()` with a clear message. |
 | `codelib-web/worker` | `runInWorker(url, { init, timeoutMs, onRequest })` on the page and `serveRun(fn)` in the Worker: one run per Worker, ended by terminating the Worker when its wall-clock deadline passes. |
 | `codelib-web/script` | `runScript({ program, preludes, input, hostCalls, egress, timeoutMs, engine })`: codelib's JavaScript guest (`crates/codelib-guest`) in a Worker. |
 | `codelib-web` | Everything above except the transpile step. |
@@ -46,11 +46,41 @@ on real timers: the default, as natively.
 starts at 0 and only moves when the component is idle, jumping to its next timer; a wall clock at
 2026-01-01T00:00:00Z plus that; both random streams seeded. Two runs with one seed print the same
 bytes, and a 10-second sleep takes milliseconds. It is repeatable, not identical to a native
-run: the order of work inside one instant follows jco, not wasmtime.
+run: the order of work inside one instant follows jco, not wasmtime. The seeded generator (xoshiro256**, seeded through SplitMix64) is not the native kit's generator, so one seed gives different random bytes in the browser and natively: repeatable per kit, not identical across kits.
 
 An embedder with its own clock (a simulator) implements `World` itself: `now`, `wallNow`,
 `timer(at, wake)`, `randomU64`, `randomFill`, `insecureSeed`, `stdout`, `stderr`, and optionally
 `stdin`, `config`, `args`, `env`.
+
+## Waiting for the outside world
+
+The loop never waits for wall-clock time on its own; two markers say what may be waited for.
+
+- `external(promise)`: real-world work the component depends on (a `fetch`, a real timer).
+  `settle()` waits for it in wall time, so a virtual clock stands still while it is pending.
+- `patient(promise)`: work to wait for only when nothing else can make progress. A pending
+  patient promise does not stop the idle handlers: a virtual clock still jumps to its next timer,
+  and `until()` does not fail with `IdleError`. Only when no work, no `external` work and no idle
+  handler can move things along do `settle()` and `until()` wait for it, in wall time.
+
+An interactive guest under a virtual clock always has a stdin read pending. When a world's
+`stdin()` returns a promise, the WASI layer waits for it with `patient`, so the guest's timers
+fire first and the loop waits for the next line of input only when nothing else is left to do.
+
+## Using the kit from a Worker
+
+A Worker cannot resolve a bare `codelib-web/...` specifier, so an embedder that starts Workers
+from its own files copies the package's browser modules next to its code:
+
+```sh
+npx codelib-web browser-files -o public/vendor/codelib-web
+```
+
+This copies every browser-side module of the built package (loop, worlds, wasi, load, jspi,
+worker, script and the index; not the transpile step or the CLI, which need Node) into the
+directory, keeping their relative paths so the imports between them keep working, and prints the
+list. Import from the copy (`import { instantiate } from './vendor/codelib-web/index.js'`). The set
+is defined in one place, `src/browser-files.ts`, and a unit test checks it against `dist/`.
 
 ## Running codelib's sandbox in the page
 
@@ -134,9 +164,9 @@ cd web && npm ci && npm pack     # builds dist/, writes codelib-web-<version>.tg
 
 - From a release: pushing a tag `web-v<version>` runs `.github/workflows/web-release.yml`, which
   tests the package and attaches the tarball to that GitHub release. A consumer then runs
-  `npm install https://github.com/backkem/codelib/releases/download/web-v0.1.0/codelib-web-0.1.0.tgz`.
+  `npm install https://github.com/backkem/codelib/releases/download/web-v0.1.1/codelib-web-0.1.1.tgz`.
 - Vendored: copy the tarball into the consuming repository and
-  `npm install ./vendor/codelib-web-0.1.0.tgz` (`"codelib-web": "file:vendor/codelib-web-0.1.0.tgz"`).
+  `npm install ./vendor/codelib-web-0.1.1.tgz` (`"codelib-web": "file:vendor/codelib-web-0.1.1.tgz"`).
 
 Either way the consumer's lockfile records the tarball's integrity hash, no build runs on install,
 and `dist/` stays out of git. npm cannot install a package from a subdirectory of a git

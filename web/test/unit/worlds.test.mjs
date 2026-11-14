@@ -5,6 +5,7 @@ import { test } from 'node:test';
 
 import { Prng } from '../../dist/prng.js';
 import { WasiExit, wasiImports } from '../../dist/wasi/index.js';
+import { until } from '../../dist/loop.js';
 import { realWorld, virtualWorld } from '../../dist/worlds.js';
 
 const quiet = { stdout: () => {}, stderr: () => {} };
@@ -91,4 +92,51 @@ test('outgoing HTTP is denied by default', () => {
   const req = new OutgoingRequest(new Fields());
   req.setAuthority('example.com');
   assert.throws(() => wasi['wasi:http/outgoing-handler'].handle(req, undefined), (e) => e.payload?.tag === 'HTTP-request-denied');
+});
+
+// No fixture reads stdin, so the WASI layer is checked against the shim directly.
+function interactiveWorld() {
+  const typed = [];
+  const world = virtualWorld({
+    seed: 5,
+    ...quiet,
+    stdin: () => new Promise((resolve) => typed.push(resolve)),
+  });
+  return { world, typed };
+}
+
+test('stdin as a promise (WASI 0.3): a virtual timer fires before the loop waits for input', async () => {
+  const { world, typed } = interactiveWorld();
+  try {
+    const [chunks] = wasiImports(world)['wasi:cli/stdin'].readViaStream();
+    let timerAt = null;
+    world.timer(2_000_000_000n, () => {
+      timerAt = world.now();
+      setTimeout(() => typed[0](new TextEncoder().encode('hi\n')), 20);
+    });
+    const { value, done } = await until(chunks.next());
+    assert.equal(done, false);
+    assert.equal(new TextDecoder().decode(value), 'hi\n');
+    assert.equal(timerAt, 2_000_000_000n);
+  } finally {
+    world.dispose();
+  }
+});
+
+test('stdin as a promise (WASI 0.2): a blocking read waits for input after the timers', async () => {
+  const { world, typed } = interactiveWorld();
+  try {
+    const stdin = wasiImports(world)['wasi:cli/stdin'].getStdin();
+    assert.equal(stdin.read(16n).length, 0, 'no data yet');
+    let timerAt = null;
+    world.timer(3_000_000_000n, () => {
+      timerAt = world.now();
+      setTimeout(() => typed[0](new TextEncoder().encode('ok')), 20);
+    });
+    const bytes = await until(Promise.resolve(stdin.blockingRead(16n)));
+    assert.equal(new TextDecoder().decode(bytes), 'ok');
+    assert.equal(timerAt, 3_000_000_000n);
+  } finally {
+    world.dispose();
+  }
 });

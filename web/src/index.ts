@@ -11,9 +11,9 @@
 //
 // This entry re-exports the browser-side pieces (not the transpile step, which needs Node).
 
-export { GLOBAL_NAME, IdleError, external, install, loopState, onIdle, settle, touch, until, type LoopEnv } from './loop.js';
+export { GLOBAL_NAME, IdleError, external, install, loopState, onIdle, patient, settle, touch, until, type LoopEnv } from './loop.js';
 export { JSPI_MISSING, hasJspi, requireJspi } from './jspi.js';
-export { camel, compileModules, findExport, instantiate, normalizeImports, unversioned, type Imports, type Instance, type LoadOptions } from './load.js';
+export { camel, compileModules, findExport, instantiate, normalizeImports, unversioned, type Imports, type Instance, type InstantiateCore, type LoadOptions } from './load.js';
 export { realWorld, virtualWorld, type RandomStream, type VirtualWorld, type VirtualWorldOptions, type World, type WorldOptions } from './worlds.js';
 export { HttpError, WasiExit, denyAll, wasiImports, type HttpErrorCode, type HttpHandler, type HttpRequest, type HttpResponse, type WasiOptions } from './wasi/index.js';
 export { egress, type EgressOptions, type EgressPolicy, type Rule } from './wasi/egress.js';

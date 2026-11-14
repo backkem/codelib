@@ -23,7 +23,21 @@ export interface LoadOptions {
   modules?: Record<string, WebAssembly.Module>;
   /** How to compile a core module that is not in `modules`. Default: fetch it next to the JS. */
   compile?: (url: URL) => Promise<WebAssembly.Module>;
+  /**
+   * How the component's core modules are instantiated, passed as is to jco's generated
+   * `instantiate(getCoreModule, imports, instantiateCore)`. Default (jco's own):
+   * `(module, importObject) => WebAssembly.instantiate(module, importObject)`. For embedders
+   * whose components must instantiate core modules themselves at run time: wrap or replace it to
+   * observe, patch or supply the instances. It may return the instance or a promise of it.
+   */
+  instantiateCore?: InstantiateCore;
 }
+
+/** A core-instantiation hook, as jco's generated `instantiate` takes it. */
+export type InstantiateCore = (
+  module: WebAssembly.Module,
+  importObject?: WebAssembly.Imports,
+) => WebAssembly.Instance | Promise<WebAssembly.Instance>;
 
 /** A component instance: jco's export object, and a way to call exports by WIT name. */
 export interface Instance {
@@ -36,6 +50,17 @@ export interface Instance {
    * export that may suspend.
    */
   call<T = unknown>(name: string, ...args: unknown[]): Promise<T>;
+  /**
+   * The names of the component's exports, sorted, in the forms `exportFn` accepts. A function
+   * exported at the top level is its WIT name (`app-get`, from jco's `appGet`); an exported
+   * instance (interface) is its full name as jco keys it (`my:pkg/app-store@1.0.0`, or the short
+   * name when jco has no other key) and each of its functions is `<instance>#<function>`
+   * (`my:pkg/app-store@1.0.0#get-all`, from `getAll`). Resource classes are not listed. With
+   * `prefix`, only the names that start with it, or whose instance's short name (after the last
+   * `/`, without the version) does: `exportNames('app-')` lists every instance named `app-...`
+   * and their functions.
+   */
+  exportNames(prefix?: string): string[];
 }
 
 /** Strips the `@version` from an interface name: `wasi:io/poll@0.2.12` is `wasi:io/poll`. */
@@ -57,6 +82,41 @@ export function normalizeImports(imports: Imports): Imports {
     out[k] = { ...(out[k] ?? {}), ...value };
   }
   return out;
+}
+
+/** `camelCase` (jco) back to `kebab-case` (WIT). */
+export function kebab(name: string): string {
+  return name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+}
+
+/** The export names of jco's export object, as `Instance.exportNames` documents. */
+export function listExports(exports: Record<string, unknown>, prefix = ''): string[] {
+  const isClass = (f: unknown) => /^class[\s{]/.test(Function.prototype.toString.call(f));
+  // The name a caller can pass to `findExport`: the WIT spelling when it resolves, else jco's key.
+  const usable = (wit: string, key: string) => (findExport(exports, wit) ? wit : key);
+  const out = new Set<string>();
+  const seen = new Map<object, string>();
+  for (const [key, value] of Object.entries(exports)) {
+    if (key === '_util') continue;
+    if (typeof value === 'function') {
+      if (!isClass(value)) out.add(usable(kebab(key), key));
+    } else if (value !== null && typeof value === 'object') {
+      // jco keys an instance by its short name and by its full name: keep the full one.
+      const prior = seen.get(value);
+      if (prior === undefined || (!prior.includes(':') && key.includes(':'))) seen.set(value, key);
+    }
+  }
+  for (const [instance, key] of [...seen].map(([obj, k]) => [obj as Record<string, unknown>, k] as const)) {
+    out.add(key);
+    for (const [fn, f] of Object.entries(instance)) {
+      if (typeof f === 'function' && !isClass(f)) {
+        const wit = `${key}#${kebab(fn)}`;
+        out.add(findExport(exports, wit) ? wit : `${key}#${fn}`);
+      }
+    }
+  }
+  const short = (name: string) => unversioned(name.split('#')[0]!).split('/').pop()!;
+  return [...out].filter((n) => n.startsWith(prefix) || short(n).startsWith(prefix)).sort();
 }
 
 /** Finds an export by WIT name in jco's export object. */
@@ -83,6 +143,7 @@ interface TranspiledModule {
   instantiate(
     getCoreModule: (path: string) => Promise<WebAssembly.Module>,
     imports: Imports,
+    instantiateCore?: InstantiateCore,
   ): Promise<Record<string, unknown>>;
 }
 
@@ -103,7 +164,7 @@ export async function instantiate(moduleUrl: string | URL, imports: Imports, opt
     const pre = options.modules?.[path];
     return pre ? Promise.resolve(pre) : compile(new URL(path, url));
   };
-  const exports = await mod.instantiate(getCoreModule, normalizeImports(imports));
+  const exports = await mod.instantiate(getCoreModule, normalizeImports(imports), options.instantiateCore);
   const exportFn = (name: string) => {
     const f = findExport(exports, name);
     if (!f) throw new Error(`the component has no export ${name} (exports: ${Object.keys(exports).join(', ')})`);
@@ -112,6 +173,7 @@ export async function instantiate(moduleUrl: string | URL, imports: Imports, opt
   return {
     exports,
     exportFn,
+    exportNames: (prefix) => listExports(exports, prefix),
     call<T>(name: string, ...args: unknown[]) {
       const f = exportFn(name);
       return until(new Promise<T>((resolve) => resolve(f(...args) as T)));
