@@ -86,7 +86,7 @@ jobs:
           key: test
 
       - name: Tests
-        run: cargo test --workspace --all-features --locked
+        run: cargo test --workspace --all-features --locked --no-fail-fast
 
       - name: Examples
         run: |

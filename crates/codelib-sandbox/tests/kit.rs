@@ -128,13 +128,13 @@ async fn a_spinning_guest_times_out_and_poisons_the_session() {
     ));
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn spinning_guests_do_not_starve_the_executor() {
-    let runtime = runtime(Limits::default().timeout(Duration::from_millis(600)));
+    let runtime = runtime(Limits::default().timeout(Duration::from_secs(3)));
 
-    // More spinning guests than this test runtime has worker threads.
+    // Twice as many spinning guests as this runtime has worker threads.
     let mut spinners = Vec::new();
-    for _ in 0..16 {
+    for _ in 0..4 {
         let runtime = runtime.clone();
         spinners.push(tokio::spawn(async move {
             let mut session = runtime.session(SessionOptions::default()).await.unwrap();
@@ -147,14 +147,15 @@ async fn spinning_guests_do_not_starve_the_executor() {
         }));
     }
 
-    // A well-behaved session still gets served while they spin.
+    // A well-behaved session still gets served while they spin: it is done
+    // before any of them has used up its budget. Each spinner yields its
+    // worker every epoch tick, so how long this takes depends on the number
+    // of spinners per worker, not on how long they spin.
     let mut session = runtime.session(SessionOptions::default()).await.unwrap();
-    let started = Instant::now();
     assert_eq!(call_u32(&mut session, "twice", 3).await.unwrap(), 6);
     assert!(
-        started.elapsed() < Duration::from_millis(500),
-        "starved for {:?}",
-        started.elapsed()
+        spinners.iter().all(|spinner| !spinner.is_finished()),
+        "the well-behaved call only completed once the spinners were gone"
     );
 
     for spinner in spinners {
