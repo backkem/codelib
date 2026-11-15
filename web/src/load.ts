@@ -53,12 +53,13 @@ export interface Instance {
   /**
    * The names of the component's exports, sorted, in the forms `exportFn` accepts. A function
    * exported at the top level is its WIT name (`app-get`, from jco's `appGet`); an exported
-   * instance (interface) is its full name as jco keys it (`my:pkg/app-store@1.0.0`, or the short
-   * name when jco has no other key) and each of its functions is `<instance>#<function>`
-   * (`my:pkg/app-store@1.0.0#get-all`, from `getAll`). Resource classes are not listed. With
-   * `prefix`, only the names that start with it, or whose instance's short name (after the last
-   * `/`, without the version) does: `exportNames('app-')` lists every instance named `app-...`
-   * and their functions.
+   * instance (interface) is its full name as jco keys it (`my:pkg/app-store@1.0.0`), or, when
+   * jco keys it camel-cased only (a plain-named instance export of a composed component), its
+   * WIT name (`app-http-get`, from `appHttpGet`); each of its functions is
+   * `<instance>#<function>` (`my:pkg/app-store@1.0.0#get-all`, from `getAll`). Resource classes
+   * are not listed. With `prefix`, only the names that start with it, or whose instance's short
+   * name (after the last `/`, without the version) does: `exportNames('app-')` lists every
+   * instance named `app-...` and their functions.
    */
   exportNames(prefix?: string): string[];
 }
@@ -107,10 +108,13 @@ export function listExports(exports: Record<string, unknown>, prefix = ''): stri
     }
   }
   for (const [instance, key] of [...seen].map(([obj, k]) => [obj as Record<string, unknown>, k] as const)) {
-    out.add(key);
+    // An instance jco keys only camel-cased (`appHttpGet`) is listed by its WIT name
+    // (`app-http-get`), provided `findExport` gets back from that to jco's key.
+    const name = !key.includes(':') && camel(kebab(key)) === key ? kebab(key) : key;
+    out.add(name);
     for (const [fn, f] of Object.entries(instance)) {
       if (typeof f === 'function' && !isClass(f)) {
-        const wit = `${key}#${kebab(fn)}`;
+        const wit = `${name}#${kebab(fn)}`;
         out.add(findExport(exports, wit) ? wit : `${key}#${fn}`);
       }
     }

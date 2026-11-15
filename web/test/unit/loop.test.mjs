@@ -112,20 +112,53 @@ test('patient: a pending virtual timer fires first, and virtual time advances', 
   }
 });
 
-test('patient: with nothing else pending, until and settle wait for it and no IdleError is raised', async () => {
+test('patient: with nothing else pending, until waits for it and no IdleError is raised', async () => {
   let input;
   const stdin = patient(new Promise((resolve) => (input = resolve)));
   setTimeout(() => input('typed'), 30);
   assert.equal(await until(stdin), 'typed');
-
-  let late;
-  const later = patient(new Promise((resolve) => (late = resolve)));
-  let settled = false;
-  setTimeout(() => late(1), 30);
-  void later.then(() => (settled = true));
-  await settle();
-  assert.equal(settled, true, 'settle waited for the patient promise');
   assert.equal(loopState().patient, 0);
+});
+
+test('patient: settle does not wait for it, so an embedder that owns time gets control back', async () => {
+  // A simulator calls settle() between instants; a keystroke is one of its own events and can
+  // only arrive after settle() has returned. A pending stdin read must not hold settle().
+  let keystroke;
+  let read = null;
+  void patient(new Promise((resolve) => (keystroke = resolve))).then((line) => (read = line));
+  let handlerRan = false;
+  const off = onIdle(() => (handlerRan = true));
+  try {
+    await settle();
+    assert.equal(read, null, 'settle came back with the read still pending');
+    assert.equal(loopState().patient, 1);
+    assert.equal(handlerRan, false, 'settle does not run the idle handlers either');
+
+    // The embedder moves on, delivers the keystroke, and settles again.
+    keystroke('k');
+    await settle();
+    assert.equal(read, 'k');
+    assert.equal(loopState().patient, 0);
+  } finally {
+    off();
+  }
+});
+
+test('patient: settle leaves a virtual clock alone while a read is pending', async () => {
+  const world = virtualWorld({ seed: 3, ...quiet });
+  let release;
+  try {
+    let fired = false;
+    world.timer(1_000_000_000n, () => (fired = true));
+    patient(new Promise((resolve) => (release = resolve)));
+    await settle();
+    assert.equal(fired, false);
+    assert.equal(world.now(), 0n);
+  } finally {
+    release();
+    await settle();
+    world.dispose();
+  }
 });
 
 test('patient: until returns when its call is done even though a patient promise is still pending', async () => {
@@ -163,8 +196,7 @@ test('patient: a rejection does not break the loop', async () => {
 
   let reject;
   const late = patient(new Promise((_, r) => (reject = r)));
-  late.catch(() => undefined);
   setTimeout(() => reject(new Error('later')), 20);
-  await settle();
+  await assert.rejects(until(late), /later/);
   assert.equal(loopState().patient, 0);
 });

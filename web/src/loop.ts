@@ -17,7 +17,7 @@
 // component is idle. `until(promise)` drives the loop until a call into the component finishes;
 // when the component is idle and the call is still pending, the idle handlers (a virtual clock
 // jumping to its next timer) get a chance to make progress. Nothing here waits for wall-clock
-// time, except for `patient` work (below), which it waits for only when nothing else can move.
+// time, except that `until` waits for `patient` work (below) when nothing else can move.
 
 type Fn = () => void;
 
@@ -120,15 +120,13 @@ function runOne(fn: Fn): void {
  * Lets the component run until it is idle: no queued work, idle polls changed nothing, and no
  * `external` work is in flight. Resolves to the number of passes it took. Throws if it does not
  * settle within `maxPasses` (a component that keeps itself busy).
+ *
+ * Idle is a fact about the component, so `settle` neither runs the idle handlers nor waits for
+ * `patient` work: a component whose only pending thing is a stdin read is idle, and an embedder
+ * that owns time gets control back to move its clock or deliver the input. Only `until`, which
+ * has a call to finish, does those two things.
  */
-export function settle(maxPasses = 1_000_000): Promise<number> {
-  return settlePasses(maxPasses, true);
-}
-
-// `waitForPatient` is for the public `settle`: with only `patient` work left it lets the idle
-// handlers move things along, then waits for the patient promise. `until` passes false because
-// it must come back as soon as its call is done, however long the patient promise stays pending.
-async function settlePasses(maxPasses: number, waitForPatient: boolean): Promise<number> {
+export async function settle(maxPasses = 1_000_000): Promise<number> {
   for (let pass = 1; pass <= maxPasses; pass++) {
     await macrotask();
     if (work.size > 0) {
@@ -143,12 +141,6 @@ async function settlePasses(maxPasses: number, waitForPatient: boolean): Promise
     if (pending.size > 0) {
       // Real-world work in flight (a fetch, a real timer): wait for it in wall time.
       await Promise.race(pending);
-      continue;
-    }
-    if (waitForPatient && patients.size > 0) {
-      // Nothing else can move: let a virtual clock jump first, and wait in wall time only when
-      // it cannot.
-      if (!runIdleHandlers()) await Promise.race(patients);
       continue;
     }
     return pass;
@@ -188,7 +180,8 @@ export class IdleError extends Error {
  * export jco wrapped for JSPI), while driving the loop as `settle()` does: the call's progress
  * may depend on queued work that only runs here. When the component goes idle and `call` is
  * still pending, the idle handlers get a chance (virtual time moves to the next timer); if none
- * of them can do anything, fails with `IdleError`.
+ * of them can do anything, waits in wall time for `patient` work if there is any, and otherwise
+ * fails with `IdleError`.
  */
 export async function until<T>(call: Promise<T>): Promise<T> {
   let done = false;
@@ -206,7 +199,7 @@ export async function until<T>(call: Promise<T>): Promise<T> {
   for (let idleRounds = 0; ; ) {
     await macrotask();
     if (done) return tracked;
-    await settlePasses(1_000_000, false);
+    await settle();
     await macrotask();
     if (done) return tracked;
     if (runIdleHandlers()) {
@@ -242,11 +235,12 @@ export function external<T>(work: Promise<T>): Promise<T> {
 }
 
 /**
- * Marks `work` as something to wait for in wall time only when nothing else can make progress.
- * Unlike `external`, a pending patient promise does not stop the idle handlers: a virtual clock
- * still jumps to its next timer, and `until` does not fail with `IdleError`. When no queued
- * work, no `external` work and no idle handler can move things along, `settle` and `until` wait
- * for the first pending patient promise to settle (a rejection counts as settling) and go on.
+ * Marks `work` as something a pending call may wait for in wall time, but only when nothing
+ * else can make progress. Unlike `external`, a pending patient promise does not stop the idle
+ * handlers: a virtual clock still jumps to its next timer. When no queued work, no `external`
+ * work and no idle handler can move things along, `until` waits for the first pending patient
+ * promise to settle (a rejection counts as settling) and goes on, instead of failing with
+ * `IdleError`. `settle` never waits for patient work: it reports the component idle.
  *
  * This is for input that arrives from outside at an unknown time, such as an interactive
  * guest's stdin read, which is always pending under a virtual clock: timers the guest is

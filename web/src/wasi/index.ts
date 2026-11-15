@@ -43,7 +43,8 @@ export function wasiImports(world: World, options: WasiOptions = {}): Record<str
   const stdout = new OutputStream((b) => world.stdout(b));
   const stderr = new OutputStream((b) => world.stderr(b));
   // Input that is not there yet is waited for `patient`ly: under a virtual clock an interactive
-  // guest always has a read pending, and its timers must still fire before the loop waits for it.
+  // guest always has a read pending, and its timers must still fire before `until` waits for it.
+  // `settle()` does not wait for it, so an embedder that owns time is not held by a pending read.
   const nextStdin = () => {
     const next = world.stdin!();
     return next instanceof Promise ? patient(next) : next;

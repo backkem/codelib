@@ -31,9 +31,11 @@ export interface World {
   stderr(bytes: Uint8Array): void;
   /**
    * The next chunk of stdin, or `undefined` at its end. A WASI 0.2 read needs the chunk at once
-   * (a promise counts as no data yet); a WASI 0.3 read may wait for it. A promise is waited for
-   * with `patient` (loop.ts), so timers still fire under a virtual clock. Without this, stdin is
-   * empty.
+   * (a promise counts as no data yet); a WASI 0.3 read may wait for it. A promise is marked
+   * `patient` (loop.ts): a call driven by `until` waits for it once nothing else can move, so
+   * timers still fire under a virtual clock, and `settle()` does not wait for it at all, so an
+   * embedder that owns time can deliver the input after `settle()` has returned. Without this,
+   * stdin is empty.
    */
   stdin?(): Uint8Array | undefined | Promise<Uint8Array | undefined>;
   /** `wasi:config/store`. */

@@ -58,14 +58,24 @@ The loop never waits for wall-clock time on its own; two markers say what may be
 
 - `external(promise)`: real-world work the component depends on (a `fetch`, a real timer).
   `settle()` waits for it in wall time, so a virtual clock stands still while it is pending.
-- `patient(promise)`: work to wait for only when nothing else can make progress. A pending
-  patient promise does not stop the idle handlers: a virtual clock still jumps to its next timer,
-  and `until()` does not fail with `IdleError`. Only when no work, no `external` work and no idle
-  handler can move things along do `settle()` and `until()` wait for it, in wall time.
+- `patient(promise)`: work a pending call may wait for, but only when nothing else can make
+  progress. It does not stop the idle handlers: a virtual clock still jumps to its next timer.
+  Only when no work, no `external` work and no idle handler can move things along does `until()`
+  wait for it, in wall time, instead of failing with `IdleError`.
 
-An interactive guest under a virtual clock always has a stdin read pending. When a world's
-`stdin()` returns a promise, the WASI layer waits for it with `patient`, so the guest's timers
-fire first and the loop waits for the next line of input only when nothing else is left to do.
+`settle()` and `until()` differ on purpose. `settle()` answers "is the component idle?": it
+never runs the idle handlers and never waits for patient work, so a component whose only pending
+thing is a stdin read is idle. `until(call)` has a call to finish, so it does both.
+
+When a world's `stdin()` returns a promise, the WASI layer marks it `patient`. That serves both
+kinds of embedder:
+
+- A guest under `virtualWorld`, driven by `until` (`instance.call`): it always has a read
+  pending, its timers fire first, and the loop waits for the next line of input only when
+  nothing else is left to do.
+- An embedder that owns time (a simulator calling `settle()` between instants): the pending read
+  does not hold `settle()`, so the simulator can go on and deliver a keystroke as one of its own
+  events, then settle again.
 
 ## Using the kit from a Worker
 
@@ -154,6 +164,24 @@ the script never sees. `.github/workflows/pages.yml` builds and deploys it. Loca
 npm run build && npm run build:demo && npm run serve:demo   # http://127.0.0.1:8080/codelib/
 ```
 
+## Upgrade notes
+
+- **0.1.2**
+  - `settle()` no longer waits for `patient` work and no longer runs the idle handlers; only
+    `until()` does. This undoes a change 0.1.1 made by accident: there, a pending `World.stdin`
+    promise held `settle()` until input arrived, which hangs an embedder that delivers input
+    after `settle()` returns. If you served stdin yourself to get around that, `World.stdin`
+    works again.
+  - `exportNames()` lists an instance that jco keys only camel-cased (a plain-named instance
+    export of a composed component, `appHttpGet`) by its WIT name (`app-http-get`,
+    `app-http-get#run`), so `exportNames('app-')` finds it. In 0.1.1 it was listed as
+    `appHttpGet`.
+- **0.1.1**
+  - New: `instantiateCore`, `exportNames(prefix?)`, `patient(promise)`, `browser-files`.
+  - A `World.stdin` promise is marked `patient`: `until()` waits for it when nothing else can
+    move, where 0.1.0 failed with `IdleError`. (0.1.1 also made `settle()` wait for it; see
+    0.1.2.)
+
 ## Using it before it is on npm
 
 The package is built and packed into one tarball, and npm installs that:
@@ -164,9 +192,9 @@ cd web && npm ci && npm pack     # builds dist/, writes codelib-web-<version>.tg
 
 - From a release: pushing a tag `web-v<version>` runs `.github/workflows/web-release.yml`, which
   tests the package and attaches the tarball to that GitHub release. A consumer then runs
-  `npm install https://github.com/backkem/codelib/releases/download/web-v0.1.1/codelib-web-0.1.1.tgz`.
+  `npm install https://github.com/backkem/codelib/releases/download/web-v0.1.2/codelib-web-0.1.2.tgz`.
 - Vendored: copy the tarball into the consuming repository and
-  `npm install ./vendor/codelib-web-0.1.1.tgz` (`"codelib-web": "file:vendor/codelib-web-0.1.1.tgz"`).
+  `npm install ./vendor/codelib-web-0.1.2.tgz` (`"codelib-web": "file:vendor/codelib-web-0.1.2.tgz"`).
 
 Either way the consumer's lockfile records the tarball's integrity hash, no build runs on install,
 and `dist/` stays out of git. npm cannot install a package from a subdirectory of a git

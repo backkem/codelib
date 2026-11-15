@@ -49,6 +49,28 @@ test('exportNames with a prefix matches the name or the instance short name', ()
   assert.deepEqual(listExports(exports, 'nothing'), []);
 });
 
+test('exportNames lists an instance jco keys only camel-cased by its WIT name', () => {
+  // A composed component's plain-named instance exports: no `ns:pkg/name` key beside the camel one.
+  const composed = {
+    appHttpGet: { run: () => {} },
+    appDnsLookup: { run: () => {}, lookUp: () => {} },
+    wasiHelper: { run: () => {} },
+    run,
+    'wasi:cli/run@0.3.0': run,
+  };
+  assert.deepEqual(listExports(composed, 'app-'), [
+    'app-dns-lookup',
+    'app-dns-lookup#look-up',
+    'app-dns-lookup#run',
+    'app-http-get',
+    'app-http-get#run',
+  ]);
+  for (const name of listExports(composed).filter((n) => n.includes('#'))) {
+    assert.equal(typeof findExport(composed, name), 'function', name);
+  }
+  assert.equal(findExport(composed, 'app-http-get#run'), composed.appHttpGet.run);
+});
+
 test('every listed function name is one findExport resolves', () => {
   for (const name of listExports(exports)) {
     if (name.includes('#') || typeof exports[name] === 'function' || name === 'plain' || name === 'app-hello') {
